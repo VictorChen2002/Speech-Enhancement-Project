@@ -1,0 +1,56 @@
+# ============================================================
+# Default Configuration for Flow-Matching Speech Enhancement
+# ============================================================
+
+# --- Data ---
+data:
+  features_dir: "data/features"
+  sample_rate: 16000
+  # DAC operates at 50Hz frame rate, MOSS at 12.5Hz
+  dac_frame_rate: 50
+  moss_frame_rate: 12.5
+  # Maximum sequence length in DAC frames (50Hz * 4s = 200 frames)
+  max_seq_len: 200
+
+# --- Model (DiT) ---
+model:
+  # Dimensionality of DAC continuous latent vectors
+  dac_latent_dim: 1024
+  # Dimensionality of MOSS embedding vectors
+  moss_embed_dim: 1024
+  # Internal hidden dimension of the DiT
+  hidden_dim: 512
+  # Number of attention heads
+  num_heads: 8
+  # Number of DiT blocks
+  num_layers: 6
+  # Dropout rate
+  dropout: 0.1
+  # Conditioning type: "none" | "last_layer" | "multi_layer"
+  condition_type: "multi_layer"
+  # Number of MOSS layers to use when condition_type == "multi_layer"
+  num_moss_layers: 4
+
+# --- Training ---
+training:
+  batch_size: 16
+  learning_rate: 1.0e-4
+  weight_decay: 1.0e-5
+  num_steps: 50000
+  warmup_steps: 1000
+  log_every: 100
+  save_every: 5000
+  eval_every: 5000
+  gradient_clip: 1.0
+  seed: 42
+  device: "cuda"
+  checkpoint_dir: "checkpoints"
+
+# --- Evaluation / Inference ---
+evaluation:
+  # Number of ODE solver steps (Euler method)
+  ode_steps: 50
+  output_dir: "outputs"
+  metrics:
+    - fad
+    - mel_spectrogram

@@ -1,0 +1,52 @@
+# =========================
+# 1. model and weights
+# =========================
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+checkpoints/
+models_saved/
+runs/
+logs/
+wandb/
+
+# =========================
+# 2. dataset and features
+# =========================
+data/raw/*
+data/mixed/*
+data/features/*
+*.wav
+*.flac
+*.mp3
+*.tar.gz
+*.zip
+# keep data/ structure, but ignore what is inside
+!data/raw/.gitkeep
+!data/mixed/.gitkeep
+!data/features/.gitkeep
+
+# =========================
+# 3. Python cache and venv
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+venv/
+env/
+.env
+
+# =========================
+# 4. Colab and Jupyter Notebook cache
+# =========================
+.ipynb_checkpoints/
+*.ipynb
+
+# =========================
+# 5. VS Code and system files
+# =========================
+.vscode/
+.DS_Store
+__MACOSX/
