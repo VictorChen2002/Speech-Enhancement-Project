@@ -1,3 +1,0 @@
-Perfect, thank you very much. I would like you to init the repo using git and push it to my github https://github.com/VictorChen2002/Speech-Enhancement-Project.git
-And then, I would like you to help me start preparing the env. For the moment I have a torch env using python 3.12 and having most of the dependencies but not all. You can choose to enrich this env to make it compatible for the project or you can create a new env.
-Also, I would like you to help me prepare the data, for the moment, I think 
