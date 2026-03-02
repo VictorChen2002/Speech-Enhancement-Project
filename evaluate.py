@@ -72,6 +72,17 @@ def decode_dac_latent(
 #  Main evaluation                                                             #
 # --------------------------------------------------------------------------- #
 
+def _auto_device(cfg_device: str = "auto") -> torch.device:
+    """Resolve 'auto' or explicit device string to a torch.device."""
+    if cfg_device == "auto":
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        if torch.backends.mps.is_available():
+            return torch.device("mps")
+        return torch.device("cpu")
+    return torch.device(cfg_device)
+
+
 def evaluate(
     config: dict,
     checkpoint_path: str,
@@ -82,7 +93,7 @@ def evaluate(
     cfg_eval = config["evaluation"]
 
     condition_type = condition_type_override or cfg_model["condition_type"]
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = _auto_device(config["training"].get("device", "auto"))
 
     print(f"{'='*60}")
     print(f"  Flow-Matching Speech Enhancement — Evaluation")
@@ -92,15 +103,39 @@ def evaluate(
     print(f"{'='*60}")
 
     # ---- Load model ----
+    # Auto-detect num_moss_layers and moss_embed_dim from saved data
+    num_moss_layers = cfg_model.get("num_moss_layers", 32)
+    moss_embed_dim = cfg_model.get("moss_embed_dim", "auto")
+
+    if condition_type == "multi_layer":
+        moss_multi_dir = Path(cfg_data["features_dir"]) / "moss_multi"
+        sample_files = sorted(moss_multi_dir.glob("*.pt"))
+        if sample_files:
+            sample_layers = torch.load(str(sample_files[0]), map_location="cpu")
+            num_moss_layers = len(sample_layers)
+            if moss_embed_dim == "auto":
+                moss_embed_dim = sample_layers[0].shape[-1]
+            print(f"[Auto-detect] MOSS multi-layer: {num_moss_layers} layers, dim={moss_embed_dim}")
+    elif condition_type == "last_layer":
+        moss_last_dir = Path(cfg_data["features_dir"]) / "moss_last"
+        sample_files = sorted(moss_last_dir.glob("*.pt"))
+        if sample_files and moss_embed_dim == "auto":
+            sample_tensor = torch.load(str(sample_files[0]), map_location="cpu")
+            moss_embed_dim = sample_tensor.shape[-1]
+            print(f"[Auto-detect] MOSS last-layer dim={moss_embed_dim}")
+
+    if moss_embed_dim == "auto":
+        moss_embed_dim = 768
+
     model = DiffusionTransformer(
         dac_latent_dim=cfg_model["dac_latent_dim"],
-        moss_embed_dim=cfg_model["moss_embed_dim"],
+        moss_embed_dim=moss_embed_dim,
         hidden_dim=cfg_model["hidden_dim"],
         num_heads=cfg_model["num_heads"],
         num_layers=cfg_model["num_layers"],
         dropout=0.0,  # no dropout at inference
         condition_type=condition_type,
-        num_moss_layers=cfg_model.get("num_moss_layers", 4),
+        num_moss_layers=num_moss_layers,
     ).to(device)
 
     ckpt = torch.load(checkpoint_path, map_location=device)
@@ -109,8 +144,7 @@ def evaluate(
     print("Model loaded.")
 
     # ---- Load DAC decoder ----
-    dac_path = dac.utils.download(model_type="16khz")
-    dac_model = load_dac_model(dac_path).to(device).eval()
+    dac_model = load_dac_model(model_type="16khz").to(device).eval()
     print("DAC decoder loaded.")
 
     # ---- Discover test samples ----

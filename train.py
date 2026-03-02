@@ -12,6 +12,7 @@ Usage:
 """
 
 import argparse
+import math
 import os
 import random
 from pathlib import Path
@@ -128,6 +129,17 @@ def collate_fn(batch: List[Dict[str, torch.Tensor]]) -> Dict[str, torch.Tensor]:
 #  Training Loop                                                               #
 # --------------------------------------------------------------------------- #
 
+def _auto_device(cfg_device: str) -> torch.device:
+    """Resolve 'auto' or explicit device string to a torch.device."""
+    if cfg_device == "auto":
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        if torch.backends.mps.is_available():
+            return torch.device("mps")
+        return torch.device("cpu")
+    return torch.device(cfg_device)
+
+
 def train(config: dict, condition_type_override: Optional[str] = None):
     # ---- Config ----
     cfg_data = config["data"]
@@ -135,7 +147,7 @@ def train(config: dict, condition_type_override: Optional[str] = None):
     cfg_train = config["training"]
 
     condition_type = condition_type_override or cfg_model["condition_type"]
-    device = torch.device(cfg_train["device"] if torch.cuda.is_available() else "cpu")
+    device = _auto_device(cfg_train["device"])
 
     # Seed
     seed = cfg_train["seed"]
@@ -168,15 +180,41 @@ def train(config: dict, condition_type_override: Optional[str] = None):
     )
 
     # ---- Model ----
+    # Auto-detect num_moss_layers and moss_embed_dim from the first .pt file
+    num_moss_layers = cfg_model.get("num_moss_layers", 32)
+    moss_embed_dim = cfg_model.get("moss_embed_dim", "auto")
+
+    if condition_type == "multi_layer":
+        moss_multi_dir = Path(cfg_data["features_dir"]) / "moss_multi"
+        sample_files = sorted(moss_multi_dir.glob("*.pt"))
+        if sample_files:
+            sample_layers = torch.load(str(sample_files[0]), map_location="cpu")
+            num_moss_layers = len(sample_layers)
+            if moss_embed_dim == "auto":
+                moss_embed_dim = sample_layers[0].shape[-1]
+            print(f"[Auto-detect] MOSS multi-layer: {num_moss_layers} layers, dim={moss_embed_dim}")
+    elif condition_type == "last_layer":
+        moss_last_dir = Path(cfg_data["features_dir"]) / "moss_last"
+        sample_files = sorted(moss_last_dir.glob("*.pt"))
+        if sample_files and moss_embed_dim == "auto":
+            sample_tensor = torch.load(str(sample_files[0]), map_location="cpu")
+            moss_embed_dim = sample_tensor.shape[-1]
+            print(f"[Auto-detect] MOSS last-layer dim={moss_embed_dim}")
+
+    # Fallback if still 'auto'
+    if moss_embed_dim == "auto":
+        moss_embed_dim = 768
+        print(f"[Fallback] moss_embed_dim={moss_embed_dim}")
+
     model = DiffusionTransformer(
         dac_latent_dim=cfg_model["dac_latent_dim"],
-        moss_embed_dim=cfg_model["moss_embed_dim"],
+        moss_embed_dim=moss_embed_dim,
         hidden_dim=cfg_model["hidden_dim"],
         num_heads=cfg_model["num_heads"],
         num_layers=cfg_model["num_layers"],
         dropout=cfg_model["dropout"],
         condition_type=condition_type,
-        num_moss_layers=cfg_model.get("num_moss_layers", 4),
+        num_moss_layers=num_moss_layers,
     ).to(device)
 
     num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -188,9 +226,17 @@ def train(config: dict, condition_type_override: Optional[str] = None):
         lr=cfg_train["learning_rate"],
         weight_decay=cfg_train["weight_decay"],
     )
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=cfg_train["num_steps"]
-    )
+    # Linear warmup + cosine decay
+    warmup_steps = cfg_train.get("warmup_steps", 0)
+    total_steps = cfg_train["num_steps"]
+
+    def lr_lambda(step):
+        if step < warmup_steps:
+            return step / max(warmup_steps, 1)
+        progress = (step - warmup_steps) / max(total_steps - warmup_steps, 1)
+        return 0.5 * (1.0 + math.cos(math.pi * progress))
+
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
     # ---- Rectified Flow ----
     flow = RectifiedFlow()

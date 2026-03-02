@@ -42,7 +42,6 @@ env/
 # 4. Colab and Jupyter Notebook cache
 # =========================
 .ipynb_checkpoints/
-*.ipynb
 
 # =========================
 # 5. VS Code and system files
@@ -50,3 +49,16 @@ env/
 .vscode/
 .DS_Store
 __MACOSX/
+
+# =========================
+# 6. Logs and outputs
+# =========================
+*.log
+overnight.log
+outputs/
+archives/
+
+# =========================
+# 7. Others
+# =========================
+prompt.txt

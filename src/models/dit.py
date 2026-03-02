@@ -279,10 +279,11 @@ class DiffusionTransformer(nn.Module):
         num_layers: int = 6,
         dropout: float = 0.1,
         condition_type: str = "multi_layer",
-        num_moss_layers: int = 4,
+        num_moss_layers: int = 24,
     ):
         super().__init__()
         self.condition_type = condition_type
+        self.num_moss_layers = num_moss_layers
 
         # Input projection: DAC latent dim -> hidden dim
         self.input_proj = nn.Linear(dac_latent_dim, hidden_dim)

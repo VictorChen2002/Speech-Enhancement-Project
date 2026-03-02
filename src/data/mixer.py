@@ -18,6 +18,7 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 import torchaudio
+from tqdm import tqdm
 
 
 def load_audio(path: str, sr: int = 16000) -> np.ndarray:
@@ -79,8 +80,14 @@ def main():
     noise_dir = Path(args.noise_dir)
     out_dir = Path(args.out_dir)
 
-    clean_files = sorted([f for f in clean_dir.iterdir() if f.suffix in (".wav", ".flac", ".mp3")])
-    noise_files = sorted([f for f in noise_dir.iterdir() if f.suffix in (".wav", ".flac", ".mp3")])
+    # Recursively find audio files (handles nested structures like LibriSpeech / MUSAN)
+    audio_exts = (".wav", ".flac", ".mp3")
+    clean_files = sorted(
+        [f for ext in audio_exts for f in clean_dir.rglob(f"*{ext}")]
+    )
+    noise_files = sorted(
+        [f for ext in audio_exts for f in noise_dir.rglob(f"*{ext}")]
+    )
 
     if not clean_files:
         raise FileNotFoundError(f"No audio files found in {clean_dir}")
@@ -94,14 +101,16 @@ def main():
         snr_dir = out_dir / f"snr_{int(snr_db)}dB"
         snr_dir.mkdir(parents=True, exist_ok=True)
 
-        for clean_path in clean_files:
+        for clean_path in tqdm(clean_files, desc=f"SNR {snr_db:+.0f} dB"):
             noise_path = random.choice(noise_files)
             clean_audio = load_audio(str(clean_path), sr=args.sr)
             noise_audio = load_audio(str(noise_path), sr=args.sr)
 
             mixed = mix_at_snr(clean_audio, noise_audio, snr_db)
 
-            out_path = snr_dir / clean_path.name
+            # Use stem to avoid name collisions from nested dirs
+            out_name = "_".join(clean_path.relative_to(clean_dir).with_suffix(".wav").parts)
+            out_path = snr_dir / out_name
             sf.write(str(out_path), mixed, args.sr)
 
         print(f"  [SNR {snr_db:+.0f} dB] Written {len(clean_files)} files -> {snr_dir}")
