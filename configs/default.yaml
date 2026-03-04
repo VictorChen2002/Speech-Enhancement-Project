@@ -5,6 +5,7 @@
 # --- Data ---
 data:
   features_dir: "data/features"
+  split_file: "data/split.json"
   sample_rate: 16000
   # DAC operates at 50Hz frame rate, MOSS at 12.5Hz
   dac_frame_rate: 50
