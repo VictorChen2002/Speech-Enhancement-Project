@@ -82,8 +82,8 @@ class OfflineFeatureDataset(Dataset):
         stem = self.stems[idx]
 
         # Load clean & noisy DAC latents
-        x1 = torch.load(self.features_dir / "clean_dac" / f"{stem}.pt", map_location="cpu")
-        x0 = torch.load(self.features_dir / "noisy_dac" / f"{stem}.pt", map_location="cpu")
+        x1 = torch.load(self.features_dir / "clean_dac" / f"{stem}.pt", map_location="cpu", weights_only=False)
+        x0 = torch.load(self.features_dir / "noisy_dac" / f"{stem}.pt", map_location="cpu", weights_only=False)
 
         x1 = self._pad_or_truncate(x1, self.max_seq_len)
         x0 = self._pad_or_truncate(x0, self.max_seq_len)
@@ -93,14 +93,14 @@ class OfflineFeatureDataset(Dataset):
         # Load MOSS condition if needed
         if self.condition_type == "last_layer":
             cond = torch.load(
-                self.features_dir / "moss_last" / f"{stem}.pt", map_location="cpu"
+                self.features_dir / "moss_last" / f"{stem}.pt", map_location="cpu", weights_only=False
             )
             cond = self._pad_or_truncate(cond, self.max_cond_len)
             sample["cond"] = cond
 
         elif self.condition_type == "multi_layer":
             cond_layers = torch.load(
-                self.features_dir / "moss_multi" / f"{stem}.pt", map_location="cpu"
+                self.features_dir / "moss_multi" / f"{stem}.pt", map_location="cpu", weights_only=False
             )
             # cond_layers is a list of (T_c, D) tensors
             cond_layers = [self._pad_or_truncate(c, self.max_cond_len) for c in cond_layers]
@@ -188,7 +188,7 @@ def train(config: dict, condition_type_override: Optional[str] = None):
         moss_multi_dir = Path(cfg_data["features_dir"]) / "moss_multi"
         sample_files = sorted(moss_multi_dir.glob("*.pt"))
         if sample_files:
-            sample_layers = torch.load(str(sample_files[0]), map_location="cpu")
+            sample_layers = torch.load(str(sample_files[0]), map_location="cpu", weights_only=False)
             num_moss_layers = len(sample_layers)
             if moss_embed_dim == "auto":
                 moss_embed_dim = sample_layers[0].shape[-1]
@@ -197,7 +197,7 @@ def train(config: dict, condition_type_override: Optional[str] = None):
         moss_last_dir = Path(cfg_data["features_dir"]) / "moss_last"
         sample_files = sorted(moss_last_dir.glob("*.pt"))
         if sample_files and moss_embed_dim == "auto":
-            sample_tensor = torch.load(str(sample_files[0]), map_location="cpu")
+            sample_tensor = torch.load(str(sample_files[0]), map_location="cpu", weights_only=False)
             moss_embed_dim = sample_tensor.shape[-1]
             print(f"[Auto-detect] MOSS last-layer dim={moss_embed_dim}")
 

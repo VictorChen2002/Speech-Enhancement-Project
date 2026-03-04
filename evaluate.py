@@ -111,7 +111,7 @@ def evaluate(
         moss_multi_dir = Path(cfg_data["features_dir"]) / "moss_multi"
         sample_files = sorted(moss_multi_dir.glob("*.pt"))
         if sample_files:
-            sample_layers = torch.load(str(sample_files[0]), map_location="cpu")
+            sample_layers = torch.load(str(sample_files[0]), map_location="cpu", weights_only=False)
             num_moss_layers = len(sample_layers)
             if moss_embed_dim == "auto":
                 moss_embed_dim = sample_layers[0].shape[-1]
@@ -120,7 +120,7 @@ def evaluate(
         moss_last_dir = Path(cfg_data["features_dir"]) / "moss_last"
         sample_files = sorted(moss_last_dir.glob("*.pt"))
         if sample_files and moss_embed_dim == "auto":
-            sample_tensor = torch.load(str(sample_files[0]), map_location="cpu")
+            sample_tensor = torch.load(str(sample_files[0]), map_location="cpu", weights_only=False)
             moss_embed_dim = sample_tensor.shape[-1]
             print(f"[Auto-detect] MOSS last-layer dim={moss_embed_dim}")
 
@@ -138,7 +138,7 @@ def evaluate(
         num_moss_layers=num_moss_layers,
     ).to(device)
 
-    ckpt = torch.load(checkpoint_path, map_location=device)
+    ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
     model.load_state_dict(ckpt["model_state_dict"])
     model.eval()
     print("Model loaded.")
@@ -167,7 +167,7 @@ def evaluate(
 
     for stem in tqdm(stems, desc="Inference"):
         # Load noisy DAC latent
-        x0 = torch.load(noisy_dac_dir / f"{stem}.pt", map_location="cpu")
+        x0 = torch.load(noisy_dac_dir / f"{stem}.pt", map_location="cpu", weights_only=False)
         if x0.shape[0] > max_seq_len:
             x0 = x0[:max_seq_len]
         x0 = x0.unsqueeze(0).to(device)  # (1, T, D)
@@ -177,13 +177,13 @@ def evaluate(
         cond_layers = None
 
         if condition_type == "last_layer":
-            c = torch.load(features_dir / "moss_last" / f"{stem}.pt", map_location="cpu")
+            c = torch.load(features_dir / "moss_last" / f"{stem}.pt", map_location="cpu", weights_only=False)
             if c.shape[0] > max_cond_len:
                 c = c[:max_cond_len]
             cond = c.unsqueeze(0).to(device)  # (1, T_c, D_c)
 
         elif condition_type == "multi_layer":
-            cl = torch.load(features_dir / "moss_multi" / f"{stem}.pt", map_location="cpu")
+            cl = torch.load(features_dir / "moss_multi" / f"{stem}.pt", map_location="cpu", weights_only=False)
             cl = [layer[:max_cond_len] if layer.shape[0] > max_cond_len else layer for layer in cl]
             cond_layers = [layer.unsqueeze(0).to(device) for layer in cl]  # list of (1, T_c, D_c)
 
