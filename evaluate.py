@@ -176,7 +176,7 @@ def evaluate(
     moss_embed_dim = cfg_model.get("moss_embed_dim", "auto")
     features_dir = Path(cfg_data["features_dir"])
 
-    if condition_type == "multi_layer":
+    if condition_type in ("multi_layer", "multi_layer_time"):
         moss_multi_dir = features_dir / "moss_multi"
         sample_files = sorted(moss_multi_dir.glob("*.pt"))
         if sample_files:
@@ -249,7 +249,7 @@ def evaluate(
                 c = c[:max_cond_len]
             cond = c.unsqueeze(0).to(device)
 
-        elif condition_type == "multi_layer":
+        elif condition_type in ("multi_layer", "multi_layer_time"):
             cl = torch.load(features_dir / "moss_multi" / f"{stem}.pt", map_location="cpu", weights_only=False)
             cl = [layer[:max_cond_len] if layer.shape[0] > max_cond_len else layer for layer in cl]
             cond_layers = [layer.unsqueeze(0).to(device) for layer in cl]
@@ -310,7 +310,7 @@ def compare_all(config: dict, drive_ckpt_dir: Optional[str] = None):
     ckpt_base = config["training"]["checkpoint_dir"]
     all_results = []
 
-    for ct in ["none", "last_layer", "multi_layer"]:
+    for ct in ["none", "last_layer", "multi_layer", "multi_layer_time"]:
         ckpt_path = _find_checkpoint(ckpt_base, ct, drive_ckpt_dir)
         if ckpt_path is None:
             print(f"\n⚠️  No checkpoint found for '{ct}', skipping.")
@@ -365,7 +365,7 @@ def main():
         "--condition_type",
         type=str,
         default=None,
-        choices=["none", "last_layer", "multi_layer"],
+        choices=["none", "last_layer", "multi_layer", "multi_layer_time"],
         help="Which condition type to evaluate",
     )
     parser.add_argument(

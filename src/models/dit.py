@@ -243,6 +243,51 @@ class MultiLayerConditionFusion(nn.Module):
 
 
 # --------------------------------------------------------------------------- #
+#  Time-Dependent Multi-Layer Condition Fusion                                 #
+# --------------------------------------------------------------------------- #
+
+class TimeDependentMultiLayerFusion(nn.Module):
+    """
+    Time-dependent weighted sum of multiple MOSS hidden-layer outputs.
+
+    Instead of a single static weight vector, uses a small MLP that takes
+    the ODE timestep t as input and produces per-layer weights.  This allows
+    different ODE steps to emphasise different MOSS layers — e.g. acoustic
+    features (lower layers) early in denoising, semantic features (upper
+    layers) later.
+    """
+
+    def __init__(self, num_layers: int, mlp_hidden: int = 64):
+        super().__init__()
+        self.num_layers = num_layers
+        self.weight_mlp = nn.Sequential(
+            nn.Linear(1, mlp_hidden),
+            nn.SiLU(),
+            nn.Linear(mlp_hidden, num_layers),
+        )
+
+    def forward(
+        self, layer_outputs: List[torch.Tensor], t: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Parameters
+        ----------
+        layer_outputs : list of (B, T_c, D) tensors, length L
+        t             : (B,) float tensor — ODE timestep in [0, 1]
+
+        Returns
+        -------
+        (B, T_c, D) weighted-sum tensor with time-dependent weights
+        """
+        weights = self.weight_mlp(t.unsqueeze(-1))          # (B, L)
+        weights = F.softmax(weights, dim=-1)                 # (B, L)
+        stacked = torch.stack(layer_outputs, dim=0)          # (L, B, T_c, D)
+        stacked = stacked.permute(1, 0, 2, 3)               # (B, L, T_c, D)
+        fused = (weights[:, :, None, None] * stacked).sum(dim=1)  # (B, T_c, D)
+        return fused
+
+
+# --------------------------------------------------------------------------- #
 #  Full DiT Model                                                              #
 # --------------------------------------------------------------------------- #
 
@@ -298,6 +343,8 @@ class DiffusionTransformer(nn.Module):
 
         if condition_type == "multi_layer":
             self.multi_layer_fusion = MultiLayerConditionFusion(num_moss_layers)
+        if condition_type == "multi_layer_time":
+            self.time_dependent_fusion = TimeDependentMultiLayerFusion(num_moss_layers)
 
         # Transformer blocks
         self.blocks = nn.ModuleList([
@@ -359,6 +406,9 @@ class DiffusionTransformer(nn.Module):
         elif self.condition_type == "multi_layer" and cond_layers is not None:
             fused = self.multi_layer_fusion(cond_layers)  # (B, T_c, D_moss)
             c = self.cond_proj(fused)                     # (B, T_c, hidden)
+        elif self.condition_type == "multi_layer_time" and cond_layers is not None:
+            fused = self.time_dependent_fusion(cond_layers, t)  # (B, T_c, D_moss)
+            c = self.cond_proj(fused)                           # (B, T_c, hidden)
 
         # Transformer blocks
         for block in self.blocks:

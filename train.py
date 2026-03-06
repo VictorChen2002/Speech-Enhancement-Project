@@ -109,7 +109,7 @@ class OfflineFeatureDataset(Dataset):
             cond = self._pad_or_truncate(cond, self.max_cond_len)
             sample["cond"] = cond
 
-        elif self.condition_type == "multi_layer":
+        elif self.condition_type in ("multi_layer", "multi_layer_time"):
             cond_layers = torch.load(
                 self.features_dir / "moss_multi" / f"{stem}.pt", map_location="cpu", weights_only=False
             )
@@ -194,7 +194,7 @@ def _detect_moss_dims(features_dir: str, condition_type: str, cfg_model: dict):
     num_moss_layers = cfg_model.get("num_moss_layers", 32)
     moss_embed_dim = cfg_model.get("moss_embed_dim", "auto")
 
-    if condition_type == "multi_layer":
+    if condition_type in ("multi_layer", "multi_layer_time"):
         moss_multi_dir = Path(features_dir) / "moss_multi"
         sample_files = sorted(moss_multi_dir.glob("*.pt"))
         if sample_files:
