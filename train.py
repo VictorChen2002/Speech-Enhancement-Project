@@ -384,7 +384,18 @@ def train(
         weight_decay=cfg_train["weight_decay"],
     )
     warmup_steps = cfg_train.get("warmup_steps", 0)
-    total_steps = cfg_train["num_steps"]
+    num_epochs = cfg_train.get("num_epochs", None)
+    steps_per_epoch = math.ceil(len(train_dataset) / cfg_train["batch_size"])
+    if num_epochs is not None:
+        total_steps = num_epochs * steps_per_epoch
+    else:
+        total_steps = cfg_train["num_steps"]
+        num_epochs = math.ceil(total_steps / max(steps_per_epoch, 1))
+    patience = cfg_train.get("patience", 0)  # 0 = no early stopping
+
+    print(f"[Schedule] {num_epochs} epochs × {steps_per_epoch} steps/epoch = {total_steps} total steps")
+    if patience > 0:
+        print(f"[Schedule] Early stopping patience = {patience} epochs")
 
     def lr_lambda(step):
         if step < warmup_steps:
@@ -456,11 +467,16 @@ def train(
     model.train()
     global_step = start_step
     epoch = start_epoch
-    eval_every = cfg_train.get("eval_every", 5000)
     best_val_loss = float("inf")
+    no_improve_count = 0  # for early stopping
 
-    while global_step < total_steps:
-        epoch += 1
+    for epoch in range(start_epoch + 1, num_epochs + 1):
+        if global_step >= total_steps:
+            break
+
+        epoch_loss = 0.0
+        epoch_batches = 0
+
         for batch in train_loader:
             if global_step >= total_steps:
                 break
@@ -488,8 +504,10 @@ def train(
             scheduler.step()
 
             global_step += 1
+            epoch_loss += loss.item()
+            epoch_batches += 1
 
-            # Logging
+            # Step-level logging
             if global_step % cfg_train["log_every"] == 0:
                 lr = optimizer.param_groups[0]["lr"]
                 print(
@@ -499,52 +517,63 @@ def train(
                 if writer:
                     writer.add_scalar("train/loss", loss.item(), global_step)
                     writer.add_scalar("train/lr", lr, global_step)
-                    writer.add_scalar("train/epoch", epoch, global_step)
                 if use_wandb:
                     import wandb
                     wandb.log({
                         "train/loss": loss.item(),
                         "train/lr": lr,
                         "train/epoch": epoch,
-                        "train/step": global_step,
                     }, step=global_step)
 
-            # Validation
-            if global_step % eval_every == 0:
-                val_loss = _validate(model, valid_loader, flow, device, condition_type)
-                print(f"  [Val] step={global_step}  val_loss={val_loss:.6f}")
-                if writer:
-                    writer.add_scalar("val/loss", val_loss, global_step)
-                if use_wandb:
-                    import wandb
-                    wandb.log({"val/loss": val_loss}, step=global_step)
+        # ---- End of epoch: validate & checkpoint ----
+        avg_train_loss = epoch_loss / max(epoch_batches, 1)
+        val_loss = _validate(model, valid_loader, flow, device, condition_type)
+        lr = optimizer.param_groups[0]["lr"]
 
-                if val_loss < best_val_loss:
-                    best_val_loss = val_loss
-                    best_path = _save_checkpoint(
-                        model, optimizer, scheduler, global_step, epoch,
-                        config, condition_type, ckpt_dir, drive_ckpt_dir,
-                    )
-                    # Also save as "best.pt"
-                    best_dst = ckpt_dir / "best.pt"
-                    shutil.copy2(str(best_path), str(best_dst))
-                    if drive_ckpt_dir:
-                        drive_best = Path(drive_ckpt_dir) / condition_type / "best.pt"
-                        shutil.copy2(str(best_path), str(drive_best))
-                    print(f"  [Val] New best val_loss={val_loss:.6f}")
+        print(
+            f"\n[Epoch {epoch:>3d}/{num_epochs}]  "
+            f"train_loss={avg_train_loss:.6f}  val_loss={val_loss:.6f}  "
+            f"lr={lr:.2e}  step={global_step}"
+        )
 
-            # Save checkpoint
-            if global_step % cfg_train["save_every"] == 0:
-                _save_checkpoint(
-                    model, optimizer, scheduler, global_step, epoch,
-                    config, condition_type, ckpt_dir, drive_ckpt_dir,
-                )
+        if writer:
+            writer.add_scalar("epoch/train_loss", avg_train_loss, epoch)
+            writer.add_scalar("epoch/val_loss", val_loss, epoch)
+            writer.add_scalar("epoch/lr", lr, epoch)
+        if use_wandb:
+            import wandb
+            wandb.log({
+                "epoch/train_loss": avg_train_loss,
+                "epoch/val_loss": val_loss,
+                "epoch/lr": lr,
+                "epoch": epoch,
+            }, step=global_step)
 
-    # ---- Final save ----
-    _save_checkpoint(
-        model, optimizer, scheduler, global_step, epoch,
-        config, condition_type, ckpt_dir, drive_ckpt_dir,
-    )
+        # Save checkpoint every epoch
+        _save_checkpoint(
+            model, optimizer, scheduler, global_step, epoch,
+            config, condition_type, ckpt_dir, drive_ckpt_dir,
+        )
+
+        # Track best
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            no_improve_count = 0
+            best_dst = ckpt_dir / "best.pt"
+            src_path = ckpt_dir / f"step_{global_step}.pt"
+            shutil.copy2(str(src_path), str(best_dst))
+            if drive_ckpt_dir:
+                drive_best = Path(drive_ckpt_dir) / condition_type / "best.pt"
+                shutil.copy2(str(src_path), str(drive_best))
+            print(f"  ★ New best val_loss={val_loss:.6f} (epoch {epoch})")
+        else:
+            no_improve_count += 1
+            print(f"  val_loss did not improve ({no_improve_count}/{patience if patience > 0 else '∞'})")
+
+        # Early stopping
+        if patience > 0 and no_improve_count >= patience:
+            print(f"\n⏹  Early stopping at epoch {epoch} (no improvement for {patience} epochs)")
+            break
 
     if writer:
         writer.close()
