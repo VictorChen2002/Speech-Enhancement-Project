@@ -1,0 +1,49 @@
+# ============================================================
+# Small Model Configuration — Plan C
+# ============================================================
+# A reduced-capacity model to fight overfitting on small datasets.
+# Uses the same architecture (DiT) but with fewer layers, heads,
+# and smaller hidden dimension.
+#
+# Parameter count comparison:
+#   Default:  hidden=512, heads=8, layers=6  → ~15M params
+#   Small:    hidden=256, heads=4, layers=4  → ~4M params
+
+# --- Data ---
+data:
+  features_dir: "data/features"
+  split_file: "data/split.json"
+  sample_rate: 16000
+  dac_frame_rate: 50
+  moss_frame_rate: 12.5
+  max_seq_len: 200
+
+# --- Model (DiT — Small) ---
+model:
+  dac_latent_dim: 1024
+  moss_embed_dim: auto
+  hidden_dim: 256          # 512 → 256
+  num_heads: 4             # 8 → 4
+  num_layers: 4            # 6 → 4
+  dropout: 0.15            # slightly higher dropout
+  condition_type: "multi_layer"
+  num_moss_layers: 32
+
+# --- Training ---
+training:
+  batch_size: 16
+  learning_rate: 2.0e-4    # slightly higher LR for smaller model
+  weight_decay: 1.0e-4     # stronger weight decay
+  num_epochs: 100
+  warmup_steps: 200
+  log_every: 50
+  gradient_clip: 1.0
+  patience: 20
+  seed: 42
+  device: "auto"
+  checkpoint_dir: "checkpoints_small"
+
+# --- Evaluation ---
+evaluation:
+  output_dir: "evaluation_output_small"
+  ode_steps: 50

@@ -249,6 +249,7 @@ def _validate(model, val_loader, flow, device, condition_type):
 def _save_checkpoint(
     model, optimizer, scheduler, global_step, epoch, config, condition_type,
     ckpt_dir, drive_ckpt_dir=None,
+    best_val_loss=float("inf"), no_improve_count=0,
 ):
     """Save checkpoint locally and optionally copy to Drive."""
     ckpt_path = ckpt_dir / f"step_{global_step}.pt"
@@ -260,6 +261,8 @@ def _save_checkpoint(
         "scheduler_state_dict": scheduler.state_dict(),
         "config": config,
         "condition_type": condition_type,
+        "best_val_loss": best_val_loss,
+        "no_improve_count": no_improve_count,
     }
     torch.save(payload, str(ckpt_path))
     print(f"  -> Saved checkpoint: {ckpt_path}")
@@ -385,12 +388,15 @@ def train(
     )
     warmup_steps = cfg_train.get("warmup_steps", 0)
     num_epochs = cfg_train.get("num_epochs", None)
+    num_steps_cfg = cfg_train.get("num_steps", None)
     steps_per_epoch = math.ceil(len(train_dataset) / cfg_train["batch_size"])
     if num_epochs is not None:
         total_steps = num_epochs * steps_per_epoch
-    else:
-        total_steps = cfg_train["num_steps"]
+    elif num_steps_cfg is not None:
+        total_steps = num_steps_cfg
         num_epochs = math.ceil(total_steps / max(steps_per_epoch, 1))
+    else:
+        raise ValueError("Config must specify either 'num_epochs' or 'num_steps'")
     patience = cfg_train.get("patience", 0)  # 0 = no early stopping
 
     print(f"[Schedule] {num_epochs} epochs × {steps_per_epoch} steps/epoch = {total_steps} total steps")
@@ -422,7 +428,10 @@ def train(
                 scheduler.step()
         start_step = ckpt["step"]
         start_epoch = ckpt.get("epoch", 0)
+        best_val_loss = ckpt.get("best_val_loss", float("inf"))
+        no_improve_count = ckpt.get("no_improve_count", 0)
         print(f"  Resumed at step={start_step}, epoch={start_epoch}")
+        print(f"  best_val_loss={best_val_loss:.6f}, no_improve_count={no_improve_count}")
 
     # ---- Rectified Flow ----
     flow = RectifiedFlow()
@@ -466,9 +475,9 @@ def train(
     # ---- Training ----
     model.train()
     global_step = start_step
-    epoch = start_epoch
-    best_val_loss = float("inf")
-    no_improve_count = 0  # for early stopping
+    if not (resume_path and Path(resume_path).exists()):
+        best_val_loss = float("inf")
+        no_improve_count = 0
 
     for epoch in range(start_epoch + 1, num_epochs + 1):
         if global_step >= total_steps:
@@ -553,6 +562,7 @@ def train(
         _save_checkpoint(
             model, optimizer, scheduler, global_step, epoch,
             config, condition_type, ckpt_dir, drive_ckpt_dir,
+            best_val_loss=best_val_loss, no_improve_count=no_improve_count,
         )
 
         # Track best

@@ -134,7 +134,7 @@ def ode_solve(
     x_t = x_0.clone()
 
     for i in range(num_steps):
-        t_val = i * dt
+        t_val = i / num_steps
         t = torch.full((x_t.shape[0],), t_val, device=x_t.device)
         v = model(x_t, t, cond=cond, cond_layers=cond_layers)
         x_t = x_t + v * dt
