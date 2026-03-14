@@ -607,7 +607,7 @@ def main():
         "--condition_type",
         type=str,
         default=None,
-        choices=["none", "last_layer", "multi_layer"],
+        choices=["none", "last_layer", "multi_layer", "multi_layer_time"],
         help="Override condition_type from config",
     )
     parser.add_argument(
