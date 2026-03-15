@@ -109,7 +109,7 @@ Supervisor: \textit{[Supervisor Name]} \quad $\cdot$ \quad
 \end{itemize}
 
 \begin{highlightbox}
-\textbf{Key Idea:} Rectified Flow learns a direct ODE from noise to clean DAC latents, conditioned on multi-layer MOSS features from the noisy input.
+\textbf{Key Idea:} Rectified Flow learns a direct ODE path from \emph{noisy} DAC latents ($\mathbf{x}_0$) to \emph{clean} DAC latents ($\mathbf{x}_1$), conditioned on multi-layer MOSS features from the noisy input.
 \end{highlightbox}
 
 \textbf{Data:} 2703 VCTK utterances + DEMAND noise (SNR\,=\,5\,dB). Split: 2163/270/270.
@@ -118,42 +118,55 @@ Supervisor: \textit{[Supervisor Name]} \quad $\cdot$ \quad
 
 \vspace{-2pt}
 
-% =============== Section 2: Model Architecture ===============
-\begin{sectionbox}{2. Model Architecture}
+% =============== Section 2: Architecture & Training ===============
+\begin{sectionbox}{2. Architecture \& Training Pipeline}
 
-\textbf{Diffusion Transformer (DiT)} --- 6 layers, 28.4M base params:
+\textbf{Feature extraction} (pre-computed, offline):
+\begin{itemize}[leftmargin=10pt,itemsep=0pt,topsep=1pt]
+  \item \textbf{DAC Encoder} on clean speech $\to$ $\mathbf{x}_1 \in \mathbb{R}^{T \times 1024}$ (50\,Hz)
+  \item \textbf{DAC Encoder} on noisy speech $\to$ $\mathbf{x}_0 \in \mathbb{R}^{T \times 1024}$ (50\,Hz)
+  \item \textbf{MOSS Tokenizer} on noisy speech $\to$ condition $\mathbf{c}$ (12.5\,Hz, $d\!=\!1280$)
+\end{itemize}
 
-\begin{center}
-\footnotesize
-\begin{tabular}{ll}
-\toprule
-\textbf{Component} & \textbf{Spec} \\
-\midrule
-DAC latent / Hidden / MOSS dim & 1024 / 512 / 1280 \\
-Heads / FFN dim & 8 / 2048 \\
-Timestep embed & Sinusoidal $\to$ MLP \\
-\bottomrule
-\end{tabular}
-\end{center}
+\textbf{Rectified Flow:} \enspace
+Sample $t\!\sim\!U(0,1)$, \enspace
+$\mathbf{x}_t = t\,\mathbf{x}_1 + (1\!-\!t)\,\mathbf{x}_0$
 
-\vspace{-2pt}
-Each block: \textbf{AdaLN}(t) $\to$ \textbf{Self-Attn} $\to$ \textbf{Cross-Attn}(c) $\to$ \textbf{FFN}
+\textbf{DiT} (6 layers, 28.4M base params). Each block:
+
+\centerline{\textbf{AdaLN}$(t)$ $\to$ \textbf{Self-Attn} $\to$ \textbf{Cross-Attn}$(\mathbf{c}$ as K,V$)$ $\to$ \textbf{FFN}}
 
 \smallskip
-\textbf{Rectified Flow:} \enspace
-$\mathbf{x}_t = t\,\mathbf{x}_1 + (1\!-\!t)\,\mathbf{x}_0$, \enspace
+Condition $\mathbf{c}$ is injected via \textbf{Cross-Attention}: Q from latent, K/V from $\mathbf{c}$.
+
 $\mathcal{L} = \|\mathbf{v}_\theta(\mathbf{x}_t,t,\mathbf{c}) - (\mathbf{x}_1\!-\!\mathbf{x}_0)\|^2$
+\enspace (MSE between predicted and true velocity)
 
-Inference: 50-step Euler from $\mathbf{x}_0\!\sim\!\mathcal{N}(0,\mathbf{I})$ to $\hat{\mathbf{x}}_1$, decoded by DAC.
-
-% Placeholder for architecture diagram
+% Placeholder for training pipeline (Image 1) + inference (Image 2)
+\noindent
+\begin{minipage}[t]{0.48\linewidth}
 \begin{center}
 \fcolorbox{accentblue}{lightgray}{%
-\parbox{0.88\linewidth}{\centering\vspace{8pt}
-\textit{[Figure: Overall Pipeline Diagram]}\\[-1pt]
-{\scriptsize Noisy $\to$ MOSS $\to$ Fusion $\to$ DiT + Flow $\to$ DAC Decoder $\to$ Enhanced}
-\vspace{8pt}}}
+\parbox{0.90\linewidth}{\centering\vspace{6pt}
+\textit{[Image 1: Training Pipeline]}\\[-1pt]
+{\scriptsize DAC$\times$2 + MOSS $\to$ interpolate $\to$ DiT $\to$ loss}
+\vspace{6pt}}}
+% \includegraphics[width=\linewidth]{images/training_pipeline.png}
 \end{center}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.48\linewidth}
+\begin{center}
+\fcolorbox{accentblue}{lightgray}{%
+\parbox{0.90\linewidth}{\centering\vspace{6pt}
+\textit{[Image 2: Inference Pipeline]}\\[-1pt]
+{\scriptsize $\mathbf{x}_0$ $\to$ 50-step ODE $\to$ $\hat{\mathbf{x}}_1$ $\to$ DAC Decoder}
+\vspace{6pt}}}
+% \includegraphics[width=\linewidth]{images/inference_pipeline.png}
+\end{center}
+\end{minipage}
+
+\smallskip
+\textbf{Inference:} Start from $\mathbf{x}_0$ (noisy DAC latent), run 50-step Euler ODE using the trained DiT, decode $\hat{\mathbf{x}}_1$ with DAC Decoder $\to$ enhanced speech.
 
 \end{sectionbox}
 
@@ -163,27 +176,44 @@ Inference: 50-step Euler from $\mathbf{x}_0\!\sim\!\mathcal{N}(0,\mathbf{I})$ to
 \begin{sectionbox}{3. Research Question: Multi-Layer Conditioning}
 
 \textbf{MOSS Stage 3} has \textbf{32 transformer layers} ($d\!=\!1280$):
-{\small early layers (0--7) capture fine-grained acoustics; middle (8--23) intermediate; late (24--31) semantic.}
+{\small early layers capture fine-grained acoustics; late layers capture semantics.}
 
 \begin{highlightbox}
-\textbf{Hypothesis:} A weighted combination of all 32 layers provides richer conditioning than using only the last layer --- analogous to multi-scale features in vision (FPN, U-Net).
+\textbf{Hypothesis:} A weighted combination of all 32 layers provides richer conditioning than using only the last layer --- analogous to multi-scale features in vision.
 \end{highlightbox}
 
-\textbf{Three conditioning strategies:}
+\textbf{Four conditioning variants} (see Image 4):
 \begin{enumerate}[leftmargin=14pt,itemsep=1pt,topsep=1pt]
+  \setcounter{enumi}{0}
+  \item \textbf{None:} $\mathbf{c} = \varnothing$ (no MOSS, no cross-attention)
   \item \textbf{Last Layer:} $\mathbf{c} = \mathbf{h}_{31}$
   \item \textbf{Static Multi-Layer:} $\mathbf{c} = \sum_i \text{softmax}(\mathbf{w})_i \cdot \mathbf{h}_i$ \enspace (32 learnable weights)
-  \item \textbf{Time-Dep.\ Multi-Layer:} $\mathbf{c}(t) = \sum_i \text{softmax}\!\big(\text{MLP}(t)\big)_i \cdot \mathbf{h}_i$\\
-    MLP: $t \!\mapsto\! \mathbb{R}^{64} \!\xrightarrow{\text{SiLU}}\! \mathbb{R}^{32}$ \enspace (2,208 extra params)
+  \item \textbf{Time-Dep.:} $\mathbf{c}(t) = \sum_i \text{softmax}\!\big(\text{MLP}(t)\big)_i \cdot \mathbf{h}_i$
+    \enspace MLP: $t \!\mapsto\! \mathbb{R}^{64} \!\xrightarrow{\text{SiLU}}\! \mathbb{R}^{32}$ (2,208 extra params)
 \end{enumerate}
 
-% Placeholder for MOSS multi-layer diagram
+% Placeholders for Rectified Flow (Image 3) + Ablation (Image 4)
+\noindent
+\begin{minipage}[t]{0.48\linewidth}
+\begin{center}
+\fcolorbox{accentgreen}{lightgray}{%
+\parbox{0.90\linewidth}{\centering\vspace{6pt}
+\textit{[Image 3: Rectified Flow]}\\[-1pt]
+{\scriptsize $\mathbf{x}_0 \to \mathbf{x}_t \to \mathbf{x}_1$, learn velocity, MSE loss}
+\vspace{6pt}}}
+% \includegraphics[width=\linewidth]{images/rectified_flow.png}
+\end{center}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.48\linewidth}
 \begin{center}
 \fcolorbox{accentpurple}{lightgray}{%
-\parbox{0.88\linewidth}{\centering\vspace{8pt}
-\textit{[Figure: MOSS Multi-Layer Extraction \& 3 Fusion Variants]}
-\vspace{8pt}}}
+\parbox{0.90\linewidth}{\centering\vspace{6pt}
+\textit{[Image 4: 4 Conditioning Variants]}\\[-1pt]
+{\scriptsize MOSS $\to$ 32 layers $\to$ Exp 1--4 fusion $\to$ DiT}
+\vspace{6pt}}}
+% \includegraphics[width=\linewidth]{images/ablation_variants.png}
 \end{center}
+\end{minipage}
 
 \end{sectionbox}
 
