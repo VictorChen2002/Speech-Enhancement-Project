@@ -232,10 +232,15 @@ Flow-Matching Speech Enhancement via Dynamic Multi-Layer Tokenizer Alignment
 \textbf{Training} (identical for all): AdamW, lr\,=\,$10^{-4}$, batch 16, max 100 epochs, cosine annealing, warmup 200 steps, early stopping (patience 20).
 
 \smallskip
-\textbf{Metrics:}
-PESQ (speech quality, $\uparrow$), \enspace
-STOI (intelligibility, $\uparrow$), \enspace
-FAD (Fr\'echet Audio Distance, $\downarrow$)
+\textbf{Evaluation Metrics:}
+\begin{itemize}[leftmargin=10pt,itemsep=0pt,topsep=1pt]
+  \item \textbf{PESQ} (Perceptual Evaluation of Speech Quality, $\uparrow$): ITU-T P.862 standard.\\
+    Range $[-0.5,\;4.5]$. Compares degraded vs reference via auditory model. Higher\,=\,better.
+  \item \textbf{STOI} (Short-Time Objective Intelligibility, $\uparrow$): Correlation of short-time envelopes.\\
+    Range $[0,\;1]$. Predicts human intelligibility scores. Higher\,=\,better.
+  \item \textbf{FAD} (Fr\'echet Audio Distance, $\downarrow$): Fr\'echet distance in VGGish embedding space.\\
+    $\text{FAD} = \|\boldsymbol{\mu}_r - \boldsymbol{\mu}_g\|^2 + \text{Tr}\!\left(\boldsymbol{\Sigma}_r + \boldsymbol{\Sigma}_g - 2(\boldsymbol{\Sigma}_r\boldsymbol{\Sigma}_g)^{1/2}\right)$. \; Lower\,=\,more natural.
+\end{itemize}
 
 \end{sectionbox}
 
@@ -263,36 +268,58 @@ FAD (Fr\'echet Audio Distance, $\downarrow$)
 \end{tabular}
 \end{center}
 
-% Placeholder for metrics bar chart + FAD curves (combined figure)
+% ---- 4 Figures: 2×2 grid ----
+\vspace{2pt}
+\noindent
+\begin{minipage}[t]{0.48\linewidth}
 \begin{center}
 \fcolorbox{accentgreen}{lightgray}{%
-\parbox{0.88\linewidth}{\centering\vspace{8pt}
-\textit{[Figure: PESQ/STOI/FAD Bar Charts \enspace+\enspace FAD over Epochs]}
-\vspace{8pt}}}
+\parbox{0.92\linewidth}{\centering\vspace{6pt}
+\textit{[Figure (i): Metrics Bars]}\\[-1pt]
+{\scriptsize \texttt{metrics\_comparison.png}}
+\vspace{6pt}}}
+% \includegraphics[width=\linewidth]{poster_figures/metrics_comparison.png}
 \end{center}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.48\linewidth}
+\begin{center}
+\fcolorbox{accentgreen}{lightgray}{%
+\parbox{0.92\linewidth}{\centering\vspace{6pt}
+\textit{[Figure (ii): FAD over Epochs]}\\[-1pt]
+{\scriptsize \texttt{fad\_over\_epochs.png}}
+\vspace{6pt}}}
+% \includegraphics[width=\linewidth]{poster_figures/fad_over_epochs.png}
+\end{center}
+\end{minipage}
 
-\textbf{Learned fusion weights (from trained checkpoints):}
-\begin{itemize}[leftmargin=10pt,itemsep=1pt,topsep=1pt]
-  \item \textbf{Exp 3 (static):} Nearly perfectly uniform (Gini\,=\,0.007, entropy ratio\,=\,1.000). Layers 0--15 \& 30--31 slightly above $\frac{1}{32}$; layers 16--29 slightly below.
-  \item \textbf{Exp 4 (time-dep.):} Top-3 layers are always \textbf{[1, 0, 2]} (earliest layers).
-    \begin{itemize}[leftmargin=8pt,itemsep=0pt]
-      \item $t\!\approx\!0$: nearly uniform (std\,=\,0.0012, max 1.06$\times$ mean)
-      \item $t\!\approx\!1$: more selective (std\,=\,0.0031, max 1.17$\times$ mean)
-      \item Early layers (0--15) gain: sum 0.484\,$\to$\,0.511; middle layers (16--29) drop: 0.483\,$\to$\,0.455
-    \end{itemize}
-\end{itemize}
-
-\begin{highlightbox}
-\textbf{Interpretation:} At $t\!\approx\!0$ (early denoising), all layers contribute equally. As $t\!\to\!1$, the model shifts toward fine-grained early-layer features for precise reconstruction. The variation is subtle (cosine sim to static $>$\,0.996) but consistent.
-\end{highlightbox}
-
-% Placeholder for weight heatmap
+\vspace{3pt}
+\noindent
+\begin{minipage}[t]{0.48\linewidth}
 \begin{center}
 \fcolorbox{accentpurple}{lightgray}{%
-\parbox{0.88\linewidth}{\centering\vspace{8pt}
-\textit{[Figure: Time-Dependent Fusion Weight Heatmap]}
-\vspace{8pt}}}
+\parbox{0.92\linewidth}{\centering\vspace{6pt}
+\textit{[Figure (iii): Exp3 Static Weights]}\\[-1pt]
+{\scriptsize \texttt{static\_weights.png}}
+\vspace{6pt}}}
+% \includegraphics[width=\linewidth]{poster_figures/static_weights.png}
 \end{center}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.48\linewidth}
+\begin{center}
+\fcolorbox{accentpurple}{lightgray}{%
+\parbox{0.92\linewidth}{\centering\vspace{6pt}
+\textit{[Figure (iv): Exp4 Time-Dep Heatmap]}\\[-1pt]
+{\scriptsize \texttt{timedep\_weights.png}}
+\vspace{6pt}}}
+% \includegraphics[width=\linewidth]{poster_figures/timedep_weights.png}
+\end{center}
+\end{minipage}
+
+\vspace{3pt}
+\begin{highlightbox}
+\textbf{Key insights:} (1)~Exp~3 learns nearly uniform weights (Gini\,=\,0.007) --- all 32 layers contribute, confirming multi-layer value and motivating Exp~4.
+(2)~Exp~4 starts uniform at $t\!\approx\!0$ then shifts toward early layers at $t\!\to\!1$ (std: 0.0012\,$\to$\,0.0031), adapting conditioning to the denoising stage.
+\end{highlightbox}
 
 \end{sectionbox}
 
