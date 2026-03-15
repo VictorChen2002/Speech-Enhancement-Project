@@ -1,0 +1,368 @@
+% ============================================================
+% Flow-Matching Speech Enhancement Poster
+% 2 pages, A3 landscape, two columns each
+% ============================================================
+\documentclass[a3paper,landscape,12pt]{article}
+
+% ---- Geometry ----
+\usepackage[a3paper,landscape,margin=1.5cm,top=2cm,bottom=1.5cm]{geometry}
+
+% ---- Packages ----
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{multicol}
+\usepackage{enumitem}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{tikz}
+\usepackage{tcolorbox}
+\usepackage{fancyhdr}
+\usepackage{hyperref}
+\usepackage{microtype}
+
+% ---- Colors ----
+\definecolor{polytblue}{HTML}{003D6B}
+\definecolor{accentblue}{HTML}{2980B9}
+\definecolor{accentgreen}{HTML}{27AE60}
+\definecolor{accentpurple}{HTML}{8E44AD}
+\definecolor{accentred}{HTML}{C0392B}
+\definecolor{lightgray}{HTML}{F5F5F5}
+\definecolor{sectionbg}{HTML}{E8F4FD}
+
+% ---- tcolorbox styles ----
+\tcbuselibrary{skins,breakable}
+\newtcolorbox{sectionbox}[1]{
+  colback=white,
+  colframe=polytblue,
+  fonttitle=\bfseries\large,
+  title=#1,
+  arc=3mm,
+  boxrule=1.2pt,
+  left=4pt,right=4pt,top=2pt,bottom=2pt,
+  toptitle=2pt,bottomtitle=2pt,
+}
+\newtcolorbox{highlightbox}{
+  colback=sectionbg,
+  colframe=accentblue,
+  arc=2mm,
+  boxrule=0.8pt,
+  left=4pt,right=4pt,top=2pt,bottom=2pt,
+}
+\newtcolorbox{keyresultbox}{
+  colback=accentgreen!8,
+  colframe=accentgreen,
+  arc=2mm,
+  boxrule=1pt,
+  left=4pt,right=4pt,top=2pt,bottom=2pt,
+}
+
+% ---- Header ----
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\headrulewidth}{0pt}
+
+% ---- Compact spacing ----
+\setlength{\parskip}{3pt}
+\setlength{\parindent}{0pt}
+\setlength{\columnsep}{1.2cm}
+
+% ---- Caption style ----
+\captionsetup{font=small,labelfont=bf,skip=3pt}
+
+\begin{document}
+
+% ================================================================
+%                       PAGE 1
+% ================================================================
+
+% ---- Title Banner ----
+\begin{center}
+\colorbox{polytblue}{%
+\parbox{0.97\textwidth}{%
+\centering\vspace{8pt}
+{\fontsize{28}{34}\selectfont\bfseries\color{white}
+Flow-Matching Speech Enhancement via\\
+Dynamic Multi-Layer Tokenizer Alignment}\\[6pt]
+{\fontsize{14}{18}\selectfont\color{white!90}
+\textit{Yiheng Chen} \quad $\cdot$ \quad 
+Supervisor: \textit{[Supervisor Name]} \quad $\cdot$ \quad
+{\'E}cole Polytechnique --- MAP583 Deep Learning}\\[6pt]
+}}
+\end{center}
+\vspace{-2pt}
+
+\begin{multicols}{2}
+
+% =============== Section 1: Introduction & Problem ===============
+\begin{sectionbox}{1. Speech Enhancement \& Motivation}
+
+\textbf{Problem:} Recover clean speech $\mathbf{x}_\text{clean}$ from noisy observation $\mathbf{x}_\text{noisy} = \mathbf{x}_\text{clean} + \mathbf{n}$, where $\mathbf{n}$ is additive noise.
+
+\textbf{Approach:} We operate in the \emph{latent space} of pre-trained audio tokenizers rather than on raw waveforms:
+
+\begin{itemize}[leftmargin=12pt,itemsep=1pt]
+  \item \textbf{DAC} (Descript Audio Codec): Encodes 16\,kHz audio into continuous latents at 50\,Hz, $\mathbf{z} \in \mathbb{R}^{1024}$. Serves as \textbf{target representation}.
+  \item \textbf{MOSS} (OpenMOSS Audio Tokenizer): Encodes audio via 4 hierarchical stages (total 68 transformer layers) into 12.5\,Hz features. Serves as \textbf{condition signal}.
+\end{itemize}
+
+\begin{highlightbox}
+\textbf{Key Idea:} Use Rectified Flow (a flow-matching generative model) to learn a direct ODE trajectory from noise to clean DAC latents, conditioned on MOSS features extracted from the noisy input.
+\end{highlightbox}
+
+\textbf{Dataset:} 2703 utterances from VCTK, mixed with DEMAND noise at SNR\,=\,5\,dB, 16\,kHz. Split: 80/10/10 (train/val/test, 270 test samples).
+
+\end{sectionbox}
+
+% =============== Section 2: Model Architecture ===============
+\begin{sectionbox}{2. Model Architecture}
+
+\textbf{Diffusion Transformer (DiT)} backbone with 6 layers:
+
+\begin{center}
+\small
+\begin{tabular}{ll}
+\toprule
+\textbf{Component} & \textbf{Specification} \\
+\midrule
+Input dim (DAC latent) & 1024 \\
+Hidden dim & 512 \\
+Attention heads & 8 \\
+DiT layers & 6 \\
+Feed-forward dim & 2048 (4$\times$ hidden) \\
+Condition dim (MOSS) & 1280 \\
+Timestep embedding & Sinusoidal $\to$ MLP \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Each DiT block: \textbf{AdaLayerNorm}(t) $\to$ \textbf{Self-Attention} $\to$ \textbf{Cross-Attention}(condition) $\to$ \textbf{FFN}
+
+\medskip
+\textbf{Rectified Flow} formulation:
+\begin{itemize}[leftmargin=12pt,itemsep=1pt]
+  \item Forward: $\mathbf{x}_t = t \cdot \mathbf{x}_1 + (1-t) \cdot \mathbf{x}_0$, \quad $\mathbf{x}_0 \sim \mathcal{N}(0, \mathbf{I})$
+  \item Target velocity: $\mathbf{v}^* = \mathbf{x}_1 - \mathbf{x}_0$ (constant along each straight path)
+  \item Loss: $\mathcal{L} = \| \mathbf{v}_\theta(\mathbf{x}_t, t, \mathbf{c}) - (\mathbf{x}_1 - \mathbf{x}_0) \|^2$
+  \item Inference: 50-step Euler solver from $\mathbf{x}_0 \sim \mathcal{N}(0,\mathbf{I})$ to $\hat{\mathbf{x}}_1$
+\end{itemize}
+
+% Placeholder for architecture diagram
+\begin{center}
+\fcolorbox{accentblue}{lightgray}{%
+\parbox{0.85\linewidth}{\centering\vspace{18pt}
+\textit{[Figure: Overall Pipeline Diagram]}\\
+Noisy Speech $\to$ MOSS $\to$ Condition $\to$ DiT + Rectified Flow $\to$ DAC Decoder $\to$ Enhanced Speech
+\vspace{18pt}}}
+\end{center}
+
+\end{sectionbox}
+
+% =============== Section 3: Research Question ===============
+\begin{sectionbox}{3. Research Question: Multi-Layer Conditioning}
+
+\textbf{MOSS Stage 3} has \textbf{32 transformer layers} producing increasingly abstract representations:
+\begin{itemize}[leftmargin=12pt,itemsep=1pt]
+  \item \textbf{Early layers} (0--7): Fine-grained acoustic features
+  \item \textbf{Middle layers} (8--23): Intermediate representations
+  \item \textbf{Late layers} (24--31): High-level semantic features
+\end{itemize}
+
+\textbf{Question:} Is there more useful information carried across \emph{all} 32 layers than in just the final output?
+
+\begin{highlightbox}
+\textbf{Hypothesis:} A weighted combination of all 32 MOSS layers provides richer conditioning than using only the last layer, similar to how multi-scale features help in vision tasks (e.g., FPN, U-Net skip connections).
+\end{highlightbox}
+
+\textbf{Three conditioning strategies:}
+\begin{enumerate}[leftmargin=16pt,itemsep=2pt]
+  \item \textbf{Last Layer Only:} $\mathbf{c} = \mathbf{h}_{31}$ --- standard approach
+  \item \textbf{Static Multi-Layer:} $\mathbf{c} = \sum_{i=0}^{31} \text{softmax}(\mathbf{w})_i \cdot \mathbf{h}_i$\\
+    32 learnable scalar weights, shared across all timesteps
+  \item \textbf{Time-Dependent Multi-Layer:} $\mathbf{c}(t) = \sum_{i=0}^{31} \text{softmax}\!\big(\text{MLP}(t)\big)_i \cdot \mathbf{h}_i$\\
+    MLP: $t \mapsto \mathbb{R}^{64} \xrightarrow{\text{SiLU}} \mathbb{R}^{32}$ --- weights adapt during ODE
+\end{enumerate}
+
+% Placeholder for MOSS multi-layer diagram
+\begin{center}
+\fcolorbox{accentpurple}{lightgray}{%
+\parbox{0.85\linewidth}{\centering\vspace{18pt}
+\textit{[Figure: MOSS Multi-Layer Extraction \& 3 Fusion Variants]}
+\vspace{18pt}}}
+\end{center}
+
+\end{sectionbox}
+
+\end{multicols}
+
+\newpage
+
+% ================================================================
+%                       PAGE 2
+% ================================================================
+
+% ---- Title repeat (smaller) ----
+\begin{center}
+\colorbox{polytblue}{%
+\parbox{0.97\textwidth}{%
+\centering\vspace{4pt}
+{\fontsize{18}{22}\selectfont\bfseries\color{white}
+Flow-Matching Speech Enhancement via Dynamic Multi-Layer Tokenizer Alignment
+\hfill \textit{Yiheng Chen} --- {\'E}cole Polytechnique}
+\vspace{4pt}
+}}
+\end{center}
+\vspace{-2pt}
+
+\begin{multicols}{2}
+
+% =============== Section 4: Experiment Design ===============
+\begin{sectionbox}{4. Experiment Design}
+
+\textbf{Four experiments} with identical architecture except conditioning:
+
+\begin{center}
+\small
+\begin{tabular}{clll}
+\toprule
+\textbf{Exp} & \textbf{Condition Type} & \textbf{MOSS Input} & \textbf{Extra Params} \\
+\midrule
+1 & No conditioning & --- & Baseline \\
+2 & Last layer only & $\mathbf{h}_{31}$ & +cross-attn \\
+3 & Static multi-layer & $\mathbf{h}_0 \ldots \mathbf{h}_{31}$ & +32 weights \\
+4 & Time-dep.\ multi-layer & $\mathbf{h}_0 \ldots \mathbf{h}_{31}$ & +MLP (2168) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{Training setup} (identical for all):
+\begin{itemize}[leftmargin=12pt,itemsep=1pt]
+  \item AdamW optimizer, lr\,=\,$10^{-4}$, weight decay\,=\,$10^{-5}$
+  \item Batch size 16, max 100 epochs, cosine annealing
+  \item Warmup: 200 steps, gradient clipping: 1.0
+  \item Early stopping: patience 20 on validation loss
+  \item Best checkpoint by validation loss
+\end{itemize}
+
+\textbf{Evaluation metrics:}
+\begin{itemize}[leftmargin=12pt,itemsep=1pt]
+  \item \textbf{PESQ} (Perceptual Evaluation of Speech Quality, wideband) --- $\uparrow$
+  \item \textbf{STOI} (Short-Time Objective Intelligibility) --- $\uparrow$
+  \item \textbf{FAD} (Fr\'echet Audio Distance, VGGish-based) --- $\downarrow$
+\end{itemize}
+
+\end{sectionbox}
+
+% =============== Section 5: Results ===============
+\begin{sectionbox}{5. Results \& Interpretation}
+
+\begin{keyresultbox}
+\centering\textbf{All metrics improve monotonically: No Cond.\ $<$ Last Layer $<$ Multi-Layer $<$ Time-Dep.}
+\end{keyresultbox}
+
+\begin{center}
+\small
+\begin{tabular}{clcccc}
+\toprule
+\textbf{Exp} & \textbf{Condition} & \textbf{PESQ $\uparrow$} & \textbf{STOI $\uparrow$} & \textbf{FAD $\downarrow$} & \textbf{Best Ep.} \\
+\midrule
+1 & No conditioning     & 1.6048 & 0.8527 & 2.9774 & 78 \\
+2 & Last layer          & 1.6499 & 0.8589 & 2.6997 & 65 \\
+3 & Static multi-layer  & 1.6868 & 0.8642 & 2.3857 & 65 \\
+4 & Time-dep.\ multi-layer & \textbf{1.6986} & \textbf{0.8647} & \textbf{2.3456} & 65 \\
+\midrule
+\multicolumn{2}{c}{\textit{Exp4 vs Exp1}} & \textit{+5.8\%} & \textit{+1.4\%} & \textit{$-$21.2\%} & \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+% Placeholder for metrics bar chart
+\begin{center}
+\fcolorbox{accentgreen}{lightgray}{%
+\parbox{0.85\linewidth}{\centering\vspace{12pt}
+\textit{[Figure: PESQ / STOI / FAD Bar Charts]}
+\vspace{12pt}}}
+\end{center}
+
+\textbf{FAD over training epochs:}
+% Placeholder for FAD curve
+\begin{center}
+\fcolorbox{accentgreen}{lightgray}{%
+\parbox{0.85\linewidth}{\centering\vspace{12pt}
+\textit{[Figure: FAD over Epochs --- 4 curves]}
+\vspace{12pt}}}
+\end{center}
+
+\medskip
+\textbf{Learned fusion weight interpretation:}
+
+\begin{itemize}[leftmargin=12pt,itemsep=2pt]
+  \item \textbf{Exp 3 (static):} Weights are \emph{nearly uniform} across 32 layers, suggesting all layers carry complementary information.
+  \item \textbf{Exp 4 (time-dependent):} The MLP learns a meaningful pattern:
+    \begin{itemize}[leftmargin=10pt,itemsep=1pt]
+      \item At $t \approx 0$ (start): weights are \emph{nearly uniform} --- the model uses all layers equally during early denoising
+      \item At $t \approx 1$ (end): weights become \emph{more selective} --- early layers (0--15) receive above-average weight (\raisebox{0pt}[0pt][0pt]{$\sim$}0.036 vs.\ $\frac{1}{32}$\,=\,0.031 baseline)
+      \item Layer 31 (final) \emph{always} retains above-average importance
+      \item Middle layers (16--30) are consistently below average
+    \end{itemize}
+\end{itemize}
+
+\begin{highlightbox}
+\textbf{Interpretation:} At $t\!\approx\!0$, the model explores all available information. As $t\!\to\!1$ (near clean output), it shifts toward \emph{fine-grained early-layer features} for precise reconstruction, while still leveraging the \emph{global semantic context} from the final layer.
+\end{highlightbox}
+
+% Placeholder for weight heatmap
+\begin{center}
+\fcolorbox{accentpurple}{lightgray}{%
+\parbox{0.85\linewidth}{\centering\vspace{12pt}
+\textit{[Figure: Time-Dependent Fusion Weight Heatmap]}
+\vspace{12pt}}}
+\end{center}
+
+\end{sectionbox}
+
+% =============== Section 6: Limitations & Future Work ===============
+\begin{sectionbox}{6. Limitations \& Future Work}
+
+\textbf{Current limitations:}
+\begin{itemize}[leftmargin=12pt,itemsep=1pt]
+  \item Trained on \textbf{single SNR} (5\,dB) only --- a proof-of-concept setting
+  \item Small dataset (2703 utterances) limits generalization
+  \item 50-step ODE inference is slower than discriminative methods
+  \item Training PESQ scores, while improving, remain moderate ($\sim$1.70)
+\end{itemize}
+
+\textbf{Future directions:}
+\begin{itemize}[leftmargin=12pt,itemsep=1pt]
+  \item \textbf{Multi-SNR training:} Train on SNR $\in \{-5, 0, 5, 10, 15\}$\,dB for robustness
+  \item \textbf{Few-layer selection:} Based on weight analysis, select only the most important layers (e.g., layers 0--15, 31) to reduce computation
+  \item \textbf{Larger datasets:} Scale to full VCTK + DNS Challenge data
+  \item \textbf{Faster inference:} Distillation or consistency models for fewer ODE steps
+  \item \textbf{Cross-tokenizer study:} Replace MOSS/DAC with other tokenizers (EnCodec, SpeechTokenizer) to test generality
+\end{itemize}
+
+\medskip
+\begin{center}
+\textbf{Code:} \url{https://github.com/VictorChen2002/Speech-Enhancement-Project}
+\end{center}
+
+\textbf{References:}
+{\small
+\begin{enumerate}[leftmargin=16pt,itemsep=0pt]
+  \item Lipman et al., \textit{Flow Matching for Generative Modeling}, ICLR 2023
+  \item Kumar et al., \textit{High-Fidelity Audio Compression with Improved RVQGAN} (DAC), NeurIPS 2023
+  \item Ma et al., \textit{Language Model Can Listen While Speaking} (MOSS), 2024
+  \item Peebles \& Xie, \textit{Scalable Diffusion Models with Transformers} (DiT), ICCV 2023
+\end{enumerate}
+}
+
+\end{sectionbox}
+
+\end{multicols}
+
+\end{document}
