@@ -73,13 +73,15 @@ Variant B — "Static Multi-Layer (Exp 3)":
 - All 32 arrows connect with learned scalar weights w₀, w₁, ..., w₃₁
 - A softmax symbol normalizes them
 - Formula: "c = Σᵢ softmax(wᵢ) · hᵢ"
-- Show a small bar chart of nearly uniform weights
+- Show a small bar chart of nearly uniform weights (Gini=0.007, entropy ratio=1.000)
+- All weights within 3% of 1/32=0.03125; layers 0-15 & 30-31 slightly above average
 
 Variant C — "Time-Dependent Multi-Layer (Exp 4)":
 - All 32 arrows connect with weights that depend on timestep t
-- An MLP box: "t → MLP(1→64→32) → softmax → w(t)"
+- An MLP box: "t → MLP(1→64→32) → softmax → w(t)" (2,208 parameters)
 - Formula: "c(t) = Σᵢ softmax(MLP(t))ᵢ · hᵢ"
 - Show a small heatmap suggesting weights vary with t
+- Top-3 highest-weight layers are always [1, 0, 2] (early layers dominate)
 
 Style: clean technical diagram, white background, blue color gradient for stages, academic poster quality, sans-serif font, clear labels with dimensions.
 ```
@@ -169,22 +171,27 @@ Chart 1 — PESQ (↑ higher is better):
 - 4 bars: Exp1 (red, 1.6048), Exp2 (blue, 1.6499), Exp3 (green, 1.6868), Exp4 (purple, 1.6986)
 - Exp4 bar highlighted with gold border (best)
 - Values displayed on top of each bar
+- Between-group improvements: +2.81%, +5.11%, +5.84% vs Exp1
 
 Chart 2 — STOI (↑ higher is better):
 - Same 4 bars: 0.8527, 0.8589, 0.8642, 0.8647
 - Exp4 highlighted
+- Between-group improvements: +0.73%, +1.35%, +1.41% vs Exp1
 
 Chart 3 — FAD (↓ lower is better):
 - Same 4 bars: 2.9774, 2.6997, 2.3857, 2.3456
 - Exp4 highlighted (lowest)
+- Between-group improvements: −9.33%, −19.87%, −21.22% vs Exp1
+
+Also show incremental gains (Exp2→Exp3: PESQ +2.24%, Exp3→Exp4: PESQ +0.70%)
 
 Legend at bottom:
-- Exp1: No Conditioning (red)
-- Exp2: Last Layer Only (blue)
-- Exp3: Static Multi-Layer (green)
-- Exp4: Time-Dependent Multi-Layer (purple)
+- Exp1: No Conditioning (28.4M params, red)
+- Exp2: Last Layer Only (38.5M params, blue)
+- Exp3: Static Multi-Layer (+32 weights, green)
+- Exp4: Time-Dependent Multi-Layer (+2,208 MLP params, purple)
 
-Below charts, a text box: "Consistent improvement across all metrics: Exp4 achieves best PESQ (+5.8%), STOI (+1.4%), and FAD (−21.2%) vs baseline"
+Below charts, a text box: "Consistent monotonic improvement across all metrics: Exp4 achieves best PESQ (+5.84%), STOI (+1.41%), and FAD (−21.22%) vs no conditioning (Exp1)"
 
 Style: clean, white background, bold colors, academic poster quality, large readable labels, suitable for A3 poster printing at 300 DPI.
 ```
@@ -196,20 +203,25 @@ Style: clean, white background, bold colors, academic poster quality, large read
 ```
 Create a heatmap visualization showing how layer importance changes with ODE timestep:
 
-MAIN FIGURE — Heatmap:
+MAIN FIGURE — Heatmap (actual data from trained model):
 - X-axis: "MOSS Transformer Layer" (0 to 31)
 - Y-axis: "ODE Timestep t" (0.0 at bottom to 1.0 at top, 11 rows)
 - Color: viridis or plasma colormap, representing fusion weight magnitude
-- Key pattern to show: 
-  - At t=0.0 (bottom): nearly uniform weights across all layers
-  - At t=1.0 (top): early layers (0-15) slightly brighter (higher weight), middle layers (16-30) slightly darker
-  - Layer 31 (last) always slightly brighter than middle layers
-  - The variation is subtle but visible
+- Key pattern to show (from real trained model):
+  - At t=0.0 (bottom): nearly uniform weights (std=0.00117, max=0.03305, 1.06× mean)
+  - At t=1.0 (top): weights become more selective (std=0.00311, max=0.03657, 1.17× mean)
+  - Top-3 highest layers are ALWAYS [1, 0, 2] (early layers!) at every timestep
+  - Early layers (0-15) gain weight: group sum 0.484→0.511
+  - Middle layers (16-29) lose weight: group sum 0.483→0.455
+  - Layers 30-31 stay roughly constant
+  - Most variable layer: Layer 1 (+0.00353 from t=0 to t=1)
+  - Most decreased layer: Layer 21 (−0.00307 from t=0 to t=1)
+  - Overall: very subtle variation — cosine sim to static weights is 0.9997 at t=0, 0.9962 at t=1
 
 SIDE PANEL (right) — Line plot:
 - Same Y-axis (timestep 0 to 1)
-- X-axis: "Weight variance across layers"
-- Shows variance increasing from t=0 to t=1
+- X-axis: "Weight std across layers"
+- Shows std increasing from 0.00117 (t=0) to 0.00311 (t=1) — ~2.7× increase
 - Title: "More selective at t→1"
 
 BOTTOM PANEL — Bar chart:
@@ -217,8 +229,9 @@ BOTTOM PANEL — Bar chart:
 - Y-axis: "Mean weight across all t"
 - Horizontal dashed line at 1/32 = 0.03125 labeled "uniform"
 - Bars colored by whether above/below uniform
+- Layers 0-15 & 30-31 slightly above, layers 16-29 slightly below (matches static weights)
 
-ANNOTATION: "Interpretation: Early in denoising (t≈0), the model uses all MOSS layers uniformly. Near completion (t≈1), it relies more on early layers (fine-grained features) while reducing middle layer contribution."
+ANNOTATION: "Interpretation: The MLP learns a subtle but consistent time-dependent shift. At t≈0, all layers contribute nearly equally (std=0.001). As t→1, the model increasingly favors early layers (0-15) for fine-grained acoustic features while reducing middle layer (16-29) contribution. The top-3 layers [1, 0, 2] remain constant — the model consistently values the earliest transformer representations most."
 
 Style: scientific figure, white background, colorbar, clear axis labels, suitable for academic poster. Matplotlib/seaborn aesthetic.
 ```
