@@ -123,8 +123,8 @@ Teachers: \textit{Vicky Kalogeiton, Xi Wang} \quad $\cdot$ \quad
 
 \vspace{-2pt}
 
-% =============== Section 2a: Architecture (Preprocessing + Training) ===============
-\begin{sectionbox}{2. Architecture --- Preprocessing \& Training}
+% =============== Section 2: Architecture ===============
+\begin{sectionbox}{2. Architecture}
 
 \textbf{(a) Preprocessing} (offline, before training):
 \begin{itemize}[leftmargin=10pt,itemsep=0pt,topsep=1pt]
@@ -145,21 +145,17 @@ $\mathcal{L} = \|\mathbf{v}_\theta(\mathbf{x}_t,t,\mathbf{c}) - (\mathbf{x}_1 - 
 \includegraphics[width=\linewidth]{image1_train.png}
 \end{center}
 
-\end{sectionbox}
-
-\vfill\columnbreak
-
-% =============== Section 2b: Architecture (Inference) ===============
-\begin{sectionbox}{2. Architecture --- Inference (cont.)}
-
 \textbf{(c) Inference} (see Figure~2):
 No clean speech needed. Start from $\mathbf{x}_0$ (noisy DAC latent), run \textbf{50-step Euler ODE} [1] using the trained DiT, then decode $\hat{\mathbf{x}}_1$ with \textbf{DAC Decoder} [2] $\to$ enhanced speech.
 
+\end{sectionbox}
+
+\columnbreak
+
+% ---- Inference figure at top of column 2 ----
 \begin{center}
 \includegraphics[width=0.7\linewidth]{image2_inference.png}
 \end{center}
-
-\end{sectionbox}
 
 \vspace{-2pt}
 
@@ -176,7 +172,7 @@ This is analogous to multi-scale feature extraction in vision (FPN, U-Net). Our 
 
 % Rectified flow figure
 \begin{center}
-\includegraphics[width=\linewidth]{image3_rectified_flow.png}
+\includegraphics[width=0.9\linewidth]{image3_rectified_flow.png}
 \end{center}
 
 \end{sectionbox}
@@ -270,7 +266,7 @@ Flow-Matching Speech Enhancement via Dynamic Multi-Layer Tokenizer Alignment
 
 % ---- 2×2 grid: top-left = table + metrics bar, top-right = FAD epochs ----
 % ---- bottom-left = fusion weights, bottom-right = time-dep heatmap ----
-\vspace{2pt}
+\vspace{1pt}
 \noindent
 \begin{minipage}[t]{0.48\linewidth}
 % --- Results table stacked above metrics_comparison ---
@@ -287,29 +283,29 @@ Flow-Matching Speech Enhancement via Dynamic Multi-Layer Tokenizer Alignment
 \bottomrule
 \end{tabular}
 \end{center}
-\vspace{1pt}
+\vspace{0pt}
 \includegraphics[width=\linewidth]{metrics_comparison.png}
 \end{minipage}\hfill
 \begin{minipage}[t]{0.48\linewidth}
 \begin{center}
-\includegraphics[width=\linewidth]{fad_over_epochs.png}
+\includegraphics[width=0.82\linewidth]{fad_over_epochs.png}
 \end{center}
 \end{minipage}
 
-\vspace{3pt}
+\vspace{1pt}
 \noindent
 \begin{minipage}[t]{0.48\linewidth}
 \begin{center}
-\includegraphics[width=\linewidth]{fusion_weights.png}
+\includegraphics[width=0.9\linewidth]{fusion_weights.png}
 \end{center}
 \end{minipage}\hfill
 \begin{minipage}[t]{0.48\linewidth}
 \begin{center}
-\includegraphics[width=\linewidth]{time_dependent_weights.png}
+\includegraphics[width=0.9\linewidth]{time_dependent_weights.png}
 \end{center}
 \end{minipage}
 
-\vspace{3pt}
+\vspace{1pt}
 \begin{highlightbox}
 \textbf{Key insights:} (1)~Exp~3 learns nearly uniform weights (Gini\,=\,0.007) --- all 32 layers contribute, confirming multi-layer value and motivating Exp~4.
 (2)~Exp~4 starts uniform at $t\!\approx\!0$ then shifts toward early layers at $t\!\to\!1$ (std: 0.0012\,$\to$\,0.0031), adapting conditioning to the denoising stage.
