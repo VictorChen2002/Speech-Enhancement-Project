@@ -74,6 +74,9 @@
 % ---- Caption style ----
 \captionsetup{font=footnotesize,labelfont=bf,skip=2pt}
 
+% ---- Graphicspath ----
+\graphicspath{{images/}}
+
 \begin{document}
 
 % ================================================================
@@ -88,9 +91,9 @@
 {\fontsize{24}{29}\selectfont\bfseries\color{white}
 Flow-Matching Speech Enhancement via Dynamic Multi-Layer Tokenizer Alignment}\\[4pt]
 {\fontsize{12}{15}\selectfont\color{white!90}
-\textit{Yiheng Chen} \quad $\cdot$ \quad 
-Supervisor: \textit{[Supervisor Name]} \quad $\cdot$ \quad
-{\'E}cole Polytechnique --- MAP583 Deep Learning}\\[4pt]
+\textit{Yiheng Chen, Andr\'e Dal Bosco} \quad $\cdot$ \quad
+Teachers: \textit{Vicky Kalogeiton, Xi Wang} \quad $\cdot$ \quad
+{\'E}cole Polytechnique --- CSC\_52002\_EP IA G\'en\'erative Multimodale (2025--2026)}\\[4pt]
 }}
 \end{center}
 \vspace{-4pt}
@@ -98,122 +101,81 @@ Supervisor: \textit{[Supervisor Name]} \quad $\cdot$ \quad
 \begin{multicols}{2}
 
 % =============== Section 1: Introduction & Problem ===============
-\begin{sectionbox}{1. Speech Enhancement \& Motivation}
+\begin{sectionbox}{1. What is Speech Enhancement?}
 
-\textbf{Problem:} Recover clean speech $\mathbf{x}_\text{clean}$ from noisy $\mathbf{x}_\text{noisy} = \mathbf{x}_\text{clean} + \mathbf{n}$.
+\textbf{Goal:} Extract the \emph{clean} speech from a noisy recording. Given a noisy signal $\mathbf{x}_\text{noisy} = \mathbf{x}_\text{clean} + \mathbf{n}$, recover $\mathbf{x}_\text{clean}$.
 
-\textbf{Approach:} Operate in the \emph{latent space} of pre-trained audio tokenizers:
+\textbf{Why synthetic data?} In practice, we never have a ``noisy + clean'' pair of the same utterance. The standard approach is to \textbf{synthesise} noisy data: take clean recordings (\textbf{LibriSpeech} dev-clean) and add pure noise (\textbf{MUSAN}) at controlled signal-to-noise ratios (SNR). This way, we always have the ground-truth clean speech for supervision.
+
+\textbf{Data:} 2703 utterances, noise added at SNR $\in \{-5, 0, 5, 10, 15\}$\,dB. We train on \textbf{5\,dB} as a quick proof-of-concept. Split: 2163\,/\,270\,/\,270.
+
+\textbf{Our approach:} Operate in the \emph{latent space} of two pre-trained audio tokenizers:
 \begin{itemize}[leftmargin=10pt,itemsep=0pt,topsep=1pt]
-  \item \textbf{DAC} (Descript Audio Codec): 16\,kHz $\to$ 50\,Hz latents, $\mathbf{z}\!\in\!\mathbb{R}^{1024}$ --- \textbf{target}
-  \item \textbf{MOSS} (OpenMOSS): 4 hierarchical stages, 68 transformer layers, 12.5\,Hz --- \textbf{condition}
+  \item \textbf{DAC} (Descript Audio Codec): compresses 16\,kHz audio to 50\,Hz latents ($d\!=\!1024$). We use it for both \textbf{source} (noisy) and \textbf{target} (clean) representations.
+  \item \textbf{MOSS} (OpenMOSS Audio Tokenizer): 4 hierarchical stages, 68 transformer layers, 12.5\,Hz output ($d\!=\!1280$). We use it to extract rich \textbf{condition} features from the noisy speech.
 \end{itemize}
 
 \begin{highlightbox}
-\textbf{Key Idea:} Rectified Flow learns a direct ODE path from \emph{noisy} DAC latents ($\mathbf{x}_0$) to \emph{clean} DAC latents ($\mathbf{x}_1$), conditioned on multi-layer MOSS features from the noisy input.
+\textbf{Key Idea:} Use \emph{Rectified Flow} to learn a direct path from the noisy DAC latent ($\mathbf{x}_0$) to the clean DAC latent ($\mathbf{x}_1$), guided by multi-layer MOSS features as conditioning.
 \end{highlightbox}
-
-\textbf{Data:} 2703 VCTK utterances + DEMAND noise (SNR\,=\,5\,dB). Split: 2163/270/270.
 
 \end{sectionbox}
 
 \vspace{-2pt}
 
-% =============== Section 2: Architecture & Training ===============
-\begin{sectionbox}{2. Architecture \& Training Pipeline}
+% =============== Section 2: Architecture ===============
+\begin{sectionbox}{2. Architecture}
 
-\textbf{Feature extraction} (pre-computed, offline):
+\textbf{(a) Preprocessing} (offline, before training):
 \begin{itemize}[leftmargin=10pt,itemsep=0pt,topsep=1pt]
-  \item \textbf{DAC Encoder} on clean speech $\to$ $\mathbf{x}_1 \in \mathbb{R}^{T \times 1024}$ (50\,Hz)
-  \item \textbf{DAC Encoder} on noisy speech $\to$ $\mathbf{x}_0 \in \mathbb{R}^{T \times 1024}$ (50\,Hz)
-  \item \textbf{MOSS Tokenizer} on noisy speech $\to$ condition $\mathbf{c}$ (12.5\,Hz, $d\!=\!1280$)
+  \item \textbf{DAC Encoder} on clean speech $\to$ $\mathbf{x}_1 \in \mathbb{R}^{T \times 1024}$ (target latent)
+  \item \textbf{DAC Encoder} on noisy speech $\to$ $\mathbf{x}_0 \in \mathbb{R}^{T \times 1024}$ (source latent)
+  \item \textbf{MOSS Tokenizer} on noisy speech $\to$ 32 layer features $\to$ condition $\mathbf{c}$ (see \S3)
 \end{itemize}
 
-\textbf{Rectified Flow:} \enspace
-Sample $t\!\sim\!U(0,1)$, \enspace
-$\mathbf{x}_t = t\,\mathbf{x}_1 + (1\!-\!t)\,\mathbf{x}_0$
+\textbf{(b) Training} (see Figure~1):
+Sample $t\!\sim\!U(0,1)$. Interpolate: $\mathbf{x}_t = t\,\mathbf{x}_1 + (1\!-\!t)\,\mathbf{x}_0$.
+A \textbf{Diffusion Transformer (DiT)} with 6 layers predicts the velocity $\mathbf{v}_\theta(\mathbf{x}_t, t, \mathbf{c})$.
+Each DiT layer: \textbf{AdaLN}$(t)$ $\to$ \textbf{Self-Attn} $\to$ \textbf{Cross-Attn}$(\mathbf{c}$ as K,V$)$ $\to$ \textbf{FFN}.
+The MOSS condition $\mathbf{c}$ is injected via \textbf{Cross-Attention} (Q from latent, K/V from $\mathbf{c}$).
 
-\textbf{DiT} (6 layers, 28.4M base params). Each block:
+$\mathcal{L} = \|\mathbf{v}_\theta(\mathbf{x}_t,t,\mathbf{c}) - (\mathbf{x}_1 - \mathbf{x}_0)\|^2$
 
-\centerline{\textbf{AdaLN}$(t)$ $\to$ \textbf{Self-Attn} $\to$ \textbf{Cross-Attn}$(\mathbf{c}$ as K,V$)$ $\to$ \textbf{FFN}}
-
-\smallskip
-Condition $\mathbf{c}$ is injected via \textbf{Cross-Attention}: Q from latent, K/V from $\mathbf{c}$.
-
-$\mathcal{L} = \|\mathbf{v}_\theta(\mathbf{x}_t,t,\mathbf{c}) - (\mathbf{x}_1\!-\!\mathbf{x}_0)\|^2$
-\enspace (MSE between predicted and true velocity)
-
-% Placeholder for training pipeline (Image 1) + inference (Image 2)
-\noindent
-\begin{minipage}[t]{0.48\linewidth}
 \begin{center}
-\fcolorbox{accentblue}{lightgray}{%
-\parbox{0.90\linewidth}{\centering\vspace{6pt}
-\textit{[Image 1: Training Pipeline]}\\[-1pt]
-{\scriptsize DAC$\times$2 + MOSS $\to$ interpolate $\to$ DiT $\to$ loss}
-\vspace{6pt}}}
-% \includegraphics[width=\linewidth]{images/training_pipeline.png}
+\includegraphics[width=\linewidth]{image1_train.png}
 \end{center}
-\end{minipage}\hfill
-\begin{minipage}[t]{0.48\linewidth}
-\begin{center}
-\fcolorbox{accentblue}{lightgray}{%
-\parbox{0.90\linewidth}{\centering\vspace{6pt}
-\textit{[Image 2: Inference Pipeline]}\\[-1pt]
-{\scriptsize $\mathbf{x}_0$ $\to$ 50-step ODE $\to$ $\hat{\mathbf{x}}_1$ $\to$ DAC Decoder}
-\vspace{6pt}}}
-% \includegraphics[width=\linewidth]{images/inference_pipeline.png}
-\end{center}
-\end{minipage}
 
-\smallskip
-\textbf{Inference:} Start from $\mathbf{x}_0$ (noisy DAC latent), run 50-step Euler ODE using the trained DiT, decode $\hat{\mathbf{x}}_1$ with DAC Decoder $\to$ enhanced speech.
+\textbf{(c) Inference} (see Figure~2):
+No clean speech needed. Start from $\mathbf{x}_0$ (noisy DAC latent), run \textbf{50-step Euler ODE} using the trained DiT, then decode $\hat{\mathbf{x}}_1$ with \textbf{DAC Decoder} $\to$ enhanced speech.
+
+\begin{center}
+\includegraphics[width=\linewidth]{image2_inference.png}
+\end{center}
 
 \end{sectionbox}
 
 \vspace{-2pt}
 
 % =============== Section 3: Research Question ===============
-\begin{sectionbox}{3. Research Question: Multi-Layer Conditioning}
+\begin{sectionbox}{3. Core Contribution: Multi-Layer Conditioning}
 
-\textbf{MOSS Stage 3} has \textbf{32 transformer layers} ($d\!=\!1280$):
-{\small early layers capture fine-grained acoustics; late layers capture semantics.}
+In standard practice, when using a pre-trained feature extractor as a conditioner, only the \textbf{last layer} output is used. But earlier layers also contain valuable information: early layers capture \textbf{fine-grained acoustic} details, while later layers encode more \textbf{abstract/semantic} features.
 
 \begin{highlightbox}
-\textbf{Hypothesis:} A weighted combination of all 32 layers provides richer conditioning than using only the last layer --- analogous to multi-scale features in vision.
+\textbf{Research Question:} Can we improve speech enhancement by using \emph{all} 32 MOSS layers instead of just the last one? And can we let the model \emph{dynamically} choose which layers matter at each step of the denoising process?
 \end{highlightbox}
 
-\textbf{Four conditioning variants} (see Image 4):
-\begin{enumerate}[leftmargin=14pt,itemsep=1pt,topsep=1pt]
-  \setcounter{enumi}{0}
-  \item \textbf{None:} $\mathbf{c} = \varnothing$ (no MOSS, no cross-attention)
-  \item \textbf{Last Layer:} $\mathbf{c} = \mathbf{h}_{31}$
-  \item \textbf{Static Multi-Layer:} $\mathbf{c} = \sum_i \text{softmax}(\mathbf{w})_i \cdot \mathbf{h}_i$ \enspace (32 learnable weights)
-  \item \textbf{Time-Dep.:} $\mathbf{c}(t) = \sum_i \text{softmax}\!\big(\text{MLP}(t)\big)_i \cdot \mathbf{h}_i$
-    \enspace MLP: $t \!\mapsto\! \mathbb{R}^{64} \!\xrightarrow{\text{SiLU}}\! \mathbb{R}^{32}$ (2,208 extra params)
-\end{enumerate}
+This is analogous to multi-scale feature extraction in vision (FPN, U-Net). Our core innovation is a \textbf{time-dependent fusion} mechanism: a lightweight MLP maps ODE timestep $t$ to 32 softmax-normalised layer weights, so the model can emphasise different layers at different denoising stages.
 
-% Placeholders for Rectified Flow (Image 3) + Ablation (Image 4)
-\noindent
-\begin{minipage}[t]{0.48\linewidth}
+% Rectified flow figure
 \begin{center}
-\fcolorbox{accentgreen}{lightgray}{%
-\parbox{0.90\linewidth}{\centering\vspace{6pt}
-\textit{[Image 3: Rectified Flow]}\\[-1pt]
-{\scriptsize $\mathbf{x}_0 \to \mathbf{x}_t \to \mathbf{x}_1$, learn velocity, MSE loss}
-\vspace{6pt}}}
-% \includegraphics[width=\linewidth]{images/rectified_flow.png}
+\includegraphics[width=\linewidth]{image3_rectified_flow.png}
 \end{center}
-\end{minipage}\hfill
-\begin{minipage}[t]{0.48\linewidth}
+
+% Ablation figure
 \begin{center}
-\fcolorbox{accentpurple}{lightgray}{%
-\parbox{0.90\linewidth}{\centering\vspace{6pt}
-\textit{[Image 4: 4 Conditioning Variants]}\\[-1pt]
-{\scriptsize MOSS $\to$ 32 layers $\to$ Exp 1--4 fusion $\to$ DiT}
-\vspace{6pt}}}
-% \includegraphics[width=\linewidth]{images/ablation_variants.png}
+\includegraphics[width=\linewidth]{image4_ablation.png}
 \end{center}
-\end{minipage}
 
 \end{sectionbox}
 
@@ -232,7 +194,7 @@ $\mathcal{L} = \|\mathbf{v}_\theta(\mathbf{x}_t,t,\mathbf{c}) - (\mathbf{x}_1\!-
 \centering\vspace{3pt}
 {\fontsize{15}{18}\selectfont\bfseries\color{white}
 Flow-Matching Speech Enhancement via Dynamic Multi-Layer Tokenizer Alignment
-\hfill \textit{Yiheng Chen} --- {\'E}cole Polytechnique}
+\hfill \textit{Y.\ Chen, A.\ Dal Bosco} --- {\'E}cole Polytechnique}
 \vspace{3pt}
 }}
 \end{center}
@@ -243,7 +205,7 @@ Flow-Matching Speech Enhancement via Dynamic Multi-Layer Tokenizer Alignment
 % =============== Section 4: Experiment Design ===============
 \begin{sectionbox}{4. Experiment Design}
 
-\textbf{Four experiments} --- identical architecture, varying only the conditioning:
+\textbf{Four experiments} --- identical architecture (28.4M base), varying only the conditioning:
 
 \begin{center}
 \footnotesize
@@ -259,18 +221,34 @@ Flow-Matching Speech Enhancement via Dynamic Multi-Layer Tokenizer Alignment
 \end{tabular}
 \end{center}
 
+\textbf{Conditioning variants:}
+\begin{enumerate}[leftmargin=14pt,itemsep=1pt,topsep=1pt]
+  \setcounter{enumi}{0}
+  \item \textbf{None:} $\mathbf{c} = \varnothing$ (no MOSS features, no cross-attention layers)
+  \item \textbf{Last Layer:} $\mathbf{c} = \mathbf{h}_{31}$
+  \item \textbf{Static:} $\mathbf{c} = \sum_i \text{softmax}(\mathbf{w})_i \cdot \mathbf{h}_i$ \enspace (32 learnable scalar weights)
+  \item \textbf{Time-Dep.:} $\mathbf{c}(t) = \sum_i \text{softmax}\!\big(\text{MLP}(t)\big)_i \cdot \mathbf{h}_i$
+    \enspace (MLP: $1 \!\to\!64 \!\xrightarrow{\text{SiLU}}\! 32$)
+\end{enumerate}
+
 \textbf{Training} (identical for all): AdamW, lr\,=\,$10^{-4}$, batch 16, max 100 epochs, cosine annealing, warmup 200 steps, early stopping (patience 20).
 
 \smallskip
 \textbf{Evaluation Metrics:}
-\begin{itemize}[leftmargin=10pt,itemsep=0pt,topsep=1pt]
-  \item \textbf{PESQ} (Perceptual Evaluation of Speech Quality, $\uparrow$): ITU-T P.862 standard.\\
-    Range $[-0.5,\;4.5]$. Compares degraded vs reference via auditory model. Higher\,=\,better.
-  \item \textbf{STOI} (Short-Time Objective Intelligibility, $\uparrow$): Correlation of short-time envelopes.\\
-    Range $[0,\;1]$. Predicts human intelligibility scores. Higher\,=\,better.
-  \item \textbf{FAD} (Fr\'echet Audio Distance, $\downarrow$): Fr\'echet distance in VGGish embedding space.\\
-    $\text{FAD} = \|\boldsymbol{\mu}_r - \boldsymbol{\mu}_g\|^2 + \text{Tr}\!\left(\boldsymbol{\Sigma}_r + \boldsymbol{\Sigma}_g - 2(\boldsymbol{\Sigma}_r\boldsymbol{\Sigma}_g)^{1/2}\right)$. \; Lower\,=\,more natural.
+\begin{itemize}[leftmargin=10pt,itemsep=1pt,topsep=1pt]
+  \item \textbf{PESQ} (Perceptual Evaluation of Speech Quality, $\uparrow$): ITU-T P.862.
+    Approximates human Mean Opinion Score via an auditory model.
+    Range $[-0.5,\;4.5]$. Typical scores: noisy input $\sim$1.5--2.0, strong supervised models $\sim$2.5--3.5, clean reference\,=\,4.5.
+  \item \textbf{STOI} (Short-Time Objective Intelligibility, $\uparrow$):
+    $\text{STOI} = \frac{1}{TM}\sum_{t,m} \rho\!\left(\mathbf{x}_{t,m},\; \hat{\mathbf{x}}_{t,m}\right)$
+    \enspace (average correlation of short-time spectral envelopes).
+    Range $[0,\;1]$. Predicts human word-recognition rates. Typical: noisy $\sim$0.80, good models $\sim$0.90+.
+  \item \textbf{FAD} (Fr\'echet Audio Distance, $\downarrow$): measures distributional similarity in VGGish embedding space.
+    $\text{FAD} = \|\boldsymbol{\mu}_r - \boldsymbol{\mu}_g\|^2 + \text{Tr}\!\left(\boldsymbol{\Sigma}_r + \boldsymbol{\Sigma}_g - 2(\boldsymbol{\Sigma}_r\boldsymbol{\Sigma}_g)^{1/2}\right)$.
+    Lower\,=\,more natural.
 \end{itemize}
+
+\textit{Note: PESQ scores from generative/flow-based models are typically lower than supervised discriminative baselines, as these models optimise perceptual naturalness rather than point-wise signal fidelity.}
 
 \end{sectionbox}
 
@@ -298,27 +276,17 @@ Flow-Matching Speech Enhancement via Dynamic Multi-Layer Tokenizer Alignment
 \end{tabular}
 \end{center}
 
-% ---- 4 Figures: 2×2 grid ----
+% ---- 4 Python-generated figures: 2×2 grid ----
 \vspace{2pt}
 \noindent
 \begin{minipage}[t]{0.48\linewidth}
 \begin{center}
-\fcolorbox{accentgreen}{lightgray}{%
-\parbox{0.92\linewidth}{\centering\vspace{6pt}
-\textit{[Figure (i): Metrics Bars]}\\[-1pt]
-{\scriptsize \texttt{metrics\_comparison.png}}
-\vspace{6pt}}}
-% \includegraphics[width=\linewidth]{poster_figures/metrics_comparison.png}
+\includegraphics[width=\linewidth]{metrics_comparison.png}
 \end{center}
 \end{minipage}\hfill
 \begin{minipage}[t]{0.48\linewidth}
 \begin{center}
-\fcolorbox{accentgreen}{lightgray}{%
-\parbox{0.92\linewidth}{\centering\vspace{6pt}
-\textit{[Figure (ii): FAD over Epochs]}\\[-1pt]
-{\scriptsize \texttt{fad\_over\_epochs.png}}
-\vspace{6pt}}}
-% \includegraphics[width=\linewidth]{poster_figures/fad_over_epochs.png}
+\includegraphics[width=\linewidth]{fad_over_epochs.png}
 \end{center}
 \end{minipage}
 
@@ -326,22 +294,12 @@ Flow-Matching Speech Enhancement via Dynamic Multi-Layer Tokenizer Alignment
 \noindent
 \begin{minipage}[t]{0.48\linewidth}
 \begin{center}
-\fcolorbox{accentpurple}{lightgray}{%
-\parbox{0.92\linewidth}{\centering\vspace{6pt}
-\textit{[Figure (iii): Exp3 Static Weights]}\\[-1pt]
-{\scriptsize \texttt{static\_weights.png}}
-\vspace{6pt}}}
-% \includegraphics[width=\linewidth]{poster_figures/static_weights.png}
+\includegraphics[width=\linewidth]{fusion_weights.png}
 \end{center}
 \end{minipage}\hfill
 \begin{minipage}[t]{0.48\linewidth}
 \begin{center}
-\fcolorbox{accentpurple}{lightgray}{%
-\parbox{0.92\linewidth}{\centering\vspace{6pt}
-\textit{[Figure (iv): Exp4 Time-Dep Heatmap]}\\[-1pt]
-{\scriptsize \texttt{timedep\_weights.png}}
-\vspace{6pt}}}
-% \includegraphics[width=\linewidth]{poster_figures/timedep_weights.png}
+\includegraphics[width=\linewidth]{time_dependent_weights.png}
 \end{center}
 \end{minipage}
 
@@ -358,14 +316,17 @@ Flow-Matching Speech Enhancement via Dynamic Multi-Layer Tokenizer Alignment
 % =============== Section 6: Limitations & Future Work ===============
 \begin{sectionbox}{6. Limitations \& Future Work}
 
-\textbf{Limitations:} Single SNR (5\,dB) proof-of-concept; small dataset (2703 utterances); 50-step ODE slower than discriminative methods; moderate absolute PESQ ($\sim$1.70).
-
-\smallskip
-\textbf{Future:}
+\textbf{Limitations:}
 \begin{itemize}[leftmargin=10pt,itemsep=0pt,topsep=1pt]
-  \item Multi-SNR training ($-$5 to 15\,dB) for robustness
-  \item Few-layer selection (use only layers 0--15, 31 based on weight analysis)
-  \item Larger data (full VCTK + DNS Challenge), faster inference (distillation)
+  \item Trained on a single SNR (5\,dB) as proof-of-concept; data available for $-$5 to 15\,dB.
+  \item Using all 32 MOSS layers means \textbf{32$\times$ more conditioning input} than single-layer baselines --- a trade-off between conditioning richness and computational cost.
+\end{itemize}
+
+\textbf{Future Work:}
+\begin{itemize}[leftmargin=10pt,itemsep=0pt,topsep=1pt]
+  \item \textbf{Layer selection study:} based on weight analysis, test fewer layers (e.g.\ first 15\,+\,last, or only first\,+\,last) to reduce the 32$\times$ cost while retaining multi-layer benefits.
+  \item \textbf{Multi-SNR training} ($-$5 to 15\,dB) for a robust, general-purpose model.
+  \item \textbf{Scale up:} larger datasets (full LibriSpeech + DNS Challenge), faster inference via ODE distillation.
 \end{itemize}
 
 \smallskip
