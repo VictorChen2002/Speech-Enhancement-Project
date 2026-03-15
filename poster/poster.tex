@@ -111,31 +111,31 @@ Teachers: \textit{Vicky Kalogeiton, Xi Wang} \quad $\cdot$ \quad
 
 \textbf{Our approach:} Operate in the \emph{latent space} of two pre-trained audio tokenizers:
 \begin{itemize}[leftmargin=10pt,itemsep=0pt,topsep=1pt]
-  \item \textbf{DAC} (Descript Audio Codec): compresses 16\,kHz audio to 50\,Hz latents ($d\!=\!1024$). We use it for both \textbf{source} (noisy) and \textbf{target} (clean) representations.
-  \item \textbf{MOSS} (OpenMOSS Audio Tokenizer): 4 hierarchical stages, 68 transformer layers, 12.5\,Hz output ($d\!=\!1280$). We use it to extract rich \textbf{condition} features from the noisy speech.
+  \item \textbf{DAC} [2] (Descript Audio Codec): compresses 16\,kHz audio to 50\,Hz latents ($d\!=\!1024$). We use it for both \textbf{source} (noisy) and \textbf{target} (clean) representations.
+  \item \textbf{MOSS} [3] (OpenMOSS Audio Tokenizer): 4 hierarchical stages, 68 transformer layers, 12.5\,Hz output ($d\!=\!1280$). We use it to extract rich \textbf{condition} features from the noisy speech.
 \end{itemize}
 
 \begin{highlightbox}
-\textbf{Key Idea:} Use \emph{Rectified Flow} to learn a direct path from the noisy DAC latent ($\mathbf{x}_0$) to the clean DAC latent ($\mathbf{x}_1$), guided by multi-layer MOSS features as conditioning.
+\textbf{Key Idea:} Use \emph{Rectified Flow} [1] to learn a direct path from the noisy DAC latent ($\mathbf{x}_0$) to the clean DAC latent ($\mathbf{x}_1$), guided by multi-layer MOSS features as conditioning.
 \end{highlightbox}
 
 \end{sectionbox}
 
 \vspace{-2pt}
 
-% =============== Section 2: Architecture ===============
-\begin{sectionbox}{2. Architecture}
+% =============== Section 2a: Architecture (Preprocessing + Training) ===============
+\begin{sectionbox}{2. Architecture --- Preprocessing \& Training}
 
 \textbf{(a) Preprocessing} (offline, before training):
 \begin{itemize}[leftmargin=10pt,itemsep=0pt,topsep=1pt]
-  \item \textbf{DAC Encoder} on clean speech $\to$ $\mathbf{x}_1 \in \mathbb{R}^{T \times 1024}$ (target latent)
-  \item \textbf{DAC Encoder} on noisy speech $\to$ $\mathbf{x}_0 \in \mathbb{R}^{T \times 1024}$ (source latent)
-  \item \textbf{MOSS Tokenizer} on noisy speech $\to$ 32 layer features $\to$ condition $\mathbf{c}$ (see \S3)
+  \item \textbf{DAC Encoder} [2] on clean speech $\to$ $\mathbf{x}_1 \in \mathbb{R}^{T \times 1024}$ (target latent)
+  \item \textbf{DAC Encoder} [2] on noisy speech $\to$ $\mathbf{x}_0 \in \mathbb{R}^{T \times 1024}$ (source latent)
+  \item \textbf{MOSS Tokenizer} [3] on noisy speech $\to$ 32 layer features $\to$ condition $\mathbf{c}$ (see \S3)
 \end{itemize}
 
 \textbf{(b) Training} (see Figure~1):
 Sample $t\!\sim\!U(0,1)$. Interpolate: $\mathbf{x}_t = t\,\mathbf{x}_1 + (1\!-\!t)\,\mathbf{x}_0$.
-A \textbf{Diffusion Transformer (DiT)} with 6 layers predicts the velocity $\mathbf{v}_\theta(\mathbf{x}_t, t, \mathbf{c})$.
+A \textbf{Diffusion Transformer} (DiT [4]) with 6 layers predicts the velocity $\mathbf{v}_\theta(\mathbf{x}_t, t, \mathbf{c})$.
 Each DiT layer: \textbf{AdaLN}$(t)$ $\to$ \textbf{Self-Attn} $\to$ \textbf{Cross-Attn}$(\mathbf{c}$ as K,V$)$ $\to$ \textbf{FFN}.
 The MOSS condition $\mathbf{c}$ is injected via \textbf{Cross-Attention} (Q from latent, K/V from $\mathbf{c}$).
 
@@ -145,11 +145,18 @@ $\mathcal{L} = \|\mathbf{v}_\theta(\mathbf{x}_t,t,\mathbf{c}) - (\mathbf{x}_1 - 
 \includegraphics[width=\linewidth]{image1_train.png}
 \end{center}
 
+\end{sectionbox}
+
+\vfill\columnbreak
+
+% =============== Section 2b: Architecture (Inference) ===============
+\begin{sectionbox}{2. Architecture --- Inference (cont.)}
+
 \textbf{(c) Inference} (see Figure~2):
-No clean speech needed. Start from $\mathbf{x}_0$ (noisy DAC latent), run \textbf{50-step Euler ODE} using the trained DiT, then decode $\hat{\mathbf{x}}_1$ with \textbf{DAC Decoder} $\to$ enhanced speech.
+No clean speech needed. Start from $\mathbf{x}_0$ (noisy DAC latent), run \textbf{50-step Euler ODE} [1] using the trained DiT, then decode $\hat{\mathbf{x}}_1$ with \textbf{DAC Decoder} [2] $\to$ enhanced speech.
 
 \begin{center}
-\includegraphics[width=\linewidth]{image2_inference.png}
+\includegraphics[width=0.7\linewidth]{image2_inference.png}
 \end{center}
 
 \end{sectionbox}
@@ -170,11 +177,6 @@ This is analogous to multi-scale feature extraction in vision (FPN, U-Net). Our 
 % Rectified flow figure
 \begin{center}
 \includegraphics[width=\linewidth]{image3_rectified_flow.png}
-\end{center}
-
-% Ablation figure
-\begin{center}
-\includegraphics[width=\linewidth]{image4_ablation.png}
 \end{center}
 
 \end{sectionbox}
@@ -231,6 +233,11 @@ Flow-Matching Speech Enhancement via Dynamic Multi-Layer Tokenizer Alignment
     \enspace (MLP: $1 \!\to\!64 \!\xrightarrow{\text{SiLU}}\! 32$)
 \end{enumerate}
 
+% Ablation figure (moved here from Section 3)
+\begin{center}
+\includegraphics[width=\linewidth]{image4_ablation.png}
+\end{center}
+
 \textbf{Training} (identical for all): AdamW, lr\,=\,$10^{-4}$, batch 16, max 100 epochs, cosine annealing, warmup 200 steps, early stopping (patience 20).
 
 \smallskip
@@ -252,7 +259,7 @@ Flow-Matching Speech Enhancement via Dynamic Multi-Layer Tokenizer Alignment
 
 \end{sectionbox}
 
-\vspace{-2pt}
+\vfill\columnbreak
 
 % =============== Section 5: Results ===============
 \begin{sectionbox}{5. Results \& Analysis}
@@ -261,28 +268,27 @@ Flow-Matching Speech Enhancement via Dynamic Multi-Layer Tokenizer Alignment
 \centering\small\textbf{Monotonic improvement: No Cond.\ $<$ Last Layer $<$ Static Multi-Layer $<$ Time-Dep.}
 \end{keyresultbox}
 
-\vspace{1pt}
+% ---- 2×2 grid: top-left = table + metrics bar, top-right = FAD epochs ----
+% ---- bottom-left = fusion weights, bottom-right = time-dep heatmap ----
+\vspace{2pt}
+\noindent
+\begin{minipage}[t]{0.48\linewidth}
+% --- Results table stacked above metrics_comparison ---
 \begin{center}
 \footnotesize
 \begin{tabular}{clccc}
 \toprule
 \textbf{Exp} & \textbf{Condition} & \textbf{PESQ $\uparrow$} & \textbf{STOI $\uparrow$} & \textbf{FAD $\downarrow$} \\
 \midrule
-1 & No conditioning     & 1.6048 & 0.8527 & 2.9774 \\
-2 & Last layer          & 1.6499 {\tiny+2.8\%} & 0.8589 & 2.6997 {\tiny$-$9.3\%} \\
-3 & Static multi-layer  & 1.6868 {\tiny+5.1\%} & 0.8642 & 2.3857 {\tiny$-$19.9\%} \\
-4 & Time-dep.            & \textbf{1.6986} {\tiny+5.8\%} & \textbf{0.8647} & \textbf{2.3456} {\tiny$-$21.2\%} \\
+1 & None      & 1.6048 & 0.8527 & 2.9774 \\
+2 & Last lyr  & 1.6499 {\tiny+2.8\%} & 0.8589 & 2.6997 \\
+3 & Static    & 1.6868 {\tiny+5.1\%} & 0.8642 & 2.3857 \\
+4 & Time-dep. & \textbf{1.6986} & \textbf{0.8647} & \textbf{2.3456} \\
 \bottomrule
 \end{tabular}
 \end{center}
-
-% ---- 4 Python-generated figures: 2×2 grid ----
-\vspace{2pt}
-\noindent
-\begin{minipage}[t]{0.48\linewidth}
-\begin{center}
+\vspace{1pt}
 \includegraphics[width=\linewidth]{metrics_comparison.png}
-\end{center}
 \end{minipage}\hfill
 \begin{minipage}[t]{0.48\linewidth}
 \begin{center}
