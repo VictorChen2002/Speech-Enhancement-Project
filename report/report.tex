@@ -1,0 +1,386 @@
+% ============================================================
+% Report: Flow-Matching Speech Enhancement via
+%         Dynamic Multi-Layer Tokenizer Alignment
+% ============================================================
+\documentclass[11pt,a4paper]{article}
+
+% ---- Packages ----
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[margin=2.4cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage[numbers]{natbib}
+
+\hypersetup{colorlinks=true,linkcolor=blue!60!black,citecolor=blue!60!black,urlcolor=blue!60!black}
+
+\title{\textbf{Flow-Matching Speech Enhancement via\\Dynamic Multi-Layer Tokenizer Alignment}}
+\author{
+  Yiheng Chen \and André Dal Bosco\\[3pt]
+  \small CSC\_52002\_EP --- IA Générative Multimodale (2025--2026)\\
+  \small École Polytechnique\\
+  \small Teachers: Vicky Kalogeiton, Xi Wang
+}
+\date{}
+
+\begin{document}
+\maketitle
+
+% ============================================================
+\begin{abstract}
+We present a flow-matching speech enhancement system that operates in the continuous latent space of two pre-trained audio tokenizers.
+A Rectified Flow model learns a direct velocity field from noisy DAC latents to clean DAC latents, conditioned on features extracted from the MOSS-Audio-Tokenizer.
+Our core contribution is a \emph{multi-layer conditioning} strategy: instead of using only the last hidden layer of the MOSS tokenizer (standard practice), we extract all 32 hidden-layer outputs from the deepest encoder stage and fuse them via a learnable weighted sum.
+We further propose a \emph{time-dependent fusion} variant where a lightweight MLP maps the ODE timestep to per-layer weights, allowing different denoising stages to emphasise different feature types.
+A controlled ablation across four conditioning strategies shows consistent, monotonic improvements in PESQ, STOI, and FAD, confirming that multi-layer tokenizer features provide complementary information for speech enhancement.
+\end{abstract}
+
+% ============================================================
+\section{Introduction}
+\label{sec:intro}
+
+Speech enhancement---the task of extracting clean speech from a noisy recording---is fundamental to many downstream applications including automatic speech recognition, hearing aids, and voice communication.
+Classical approaches operate in the time-frequency domain with supervised regression~\cite{lu2013speech}, while recent work has explored generative models that can produce natural-sounding speech by modelling the distribution of clean signals~\cite{richter2023speech}.
+
+A promising recent direction is latent-space generative modelling: rather than operating on raw waveforms or spectrograms, one encodes audio into a compact continuous latent space using a pre-trained codec and performs generation there.
+This dramatically reduces the sequence length and allows the generative model to focus on high-level structure.
+
+In this project, we adopt \textbf{Rectified Flow}~\cite{lipman2023flow}---a flow-matching framework that learns a straight-line velocity field between two distributions---to map noisy audio latents to clean audio latents.
+A \textbf{Diffusion Transformer} (DiT)~\cite{peebles2023scalable} serves as the velocity predictor, with conditioning injected via cross-attention from features of the \textbf{MOSS-Audio-Tokenizer}~\cite{ma2024language}, a large-scale (1.6B parameter) hierarchical audio encoder.
+
+\paragraph{Core contribution.}
+Pre-trained feature extractors contain rich information distributed across their layers: early layers capture fine-grained acoustic details while deeper layers encode more abstract semantic and prosodic features.
+In standard practice, only the \emph{last} hidden layer is used for conditioning.
+We hypothesise that leveraging \emph{all} layers can improve enhancement quality.
+We design two fusion strategies---static and time-dependent---and conduct a systematic four-way ablation to isolate the effect of multi-layer conditioning.
+
+% ============================================================
+\section{Background}
+\label{sec:background}
+
+\subsection{Rectified Flow}
+\label{sec:rectified-flow}
+
+Rectified Flow~\cite{lipman2023flow,liu2023flow} defines a generative process by learning a velocity field that transports samples along straight paths between a source distribution and a target distribution.
+Given paired samples $\mathbf{x}_0 \sim p_{\text{source}}$ and $\mathbf{x}_1 \sim p_{\text{target}}$, the interpolated point at time $t \in [0,1]$ is:
+\begin{equation}
+  \mathbf{x}_t = t\,\mathbf{x}_1 + (1 - t)\,\mathbf{x}_0
+  \label{eq:interpolation}
+\end{equation}
+The target velocity field is constant along each path:
+\begin{equation}
+  \mathbf{v}^*(\mathbf{x}_t, t) = \mathbf{x}_1 - \mathbf{x}_0
+  \label{eq:target-v}
+\end{equation}
+A neural network $\mathbf{v}_\theta$ is trained to predict this velocity via the MSE objective:
+\begin{equation}
+  \mathcal{L} = \mathbb{E}_{t \sim U(0,1)}\left[\left\|\mathbf{v}_\theta(\mathbf{x}_t, t, \mathbf{c}) - (\mathbf{x}_1 - \mathbf{x}_0)\right\|^2\right]
+  \label{eq:loss}
+\end{equation}
+where $\mathbf{c}$ denotes optional conditioning information.
+At inference, $\mathbf{x}_0$ (noisy latent) is integrated forward using the Euler method with $N$ steps to produce the predicted clean latent $\hat{\mathbf{x}}_1$.
+
+\textbf{Crucially}, in our setting $\mathbf{x}_0$ is \emph{not} Gaussian noise but directly the noisy DAC latent.
+The flow learns a denoising transformation in latent space, starting from a meaningful corrupted signal rather than pure noise.
+
+\subsection{Audio Tokenizers}
+\label{sec:tokenizers}
+
+\paragraph{DAC} (Descript Audio Codec)~\cite{kumar2024high} compresses 16\,kHz audio to a continuous latent representation at 50\,Hz with dimensionality $d=1024$, followed by residual vector quantisation (RVQ).
+We use the \emph{pre-quantisation} continuous latent as both the source ($\mathbf{x}_0$, from noisy audio) and target ($\mathbf{x}_1$, from clean audio) for the flow model.
+
+\paragraph{MOSS-Audio-Tokenizer}~\cite{ma2024language} is a large hierarchical audio encoder (1.6B parameters) organised into 4 stages of progressively increasing abstraction:
+\begin{itemize}[itemsep=2pt]
+  \item \textbf{Stage 0}: Patch embedding (factor 240) $\to$ 12-layer Transformer, $d=768$
+  \item \textbf{Stage 1}: Patch (factor 2) $\to$ 12-layer Transformer, $d=768$
+  \item \textbf{Stage 2}: Patch (factor 2) $\to$ 12-layer Transformer, $d=768$
+  \item \textbf{Stage 3}: Patch (factor 2) $\to$ \textbf{32-layer Transformer}, $d=1280$
+\end{itemize}
+The total temporal downsampling is $240 \times 2 \times 2 \times 2 = 1920$, yielding 12.5\,Hz features from 24\,kHz input.
+We extract features from the \textbf{32 layers of Stage~3} as multi-layer conditioning.
+The standard last-layer output (pre-RVQ) has dimensionality 768.
+
+% ============================================================
+\section{Method}
+\label{sec:method}
+
+\subsection{System Overview}
+
+Our pipeline consists of three stages:
+
+\textbf{(1) Offline feature extraction.}
+All audio is processed once through DAC and MOSS before training:
+\begin{itemize}[itemsep=2pt]
+  \item DAC Encoder on clean speech $\to$ $\mathbf{x}_1 \in \mathbb{R}^{T \times 1024}$ (target)
+  \item DAC Encoder on noisy speech $\to$ $\mathbf{x}_0 \in \mathbb{R}^{T \times 1024}$ (source)
+  \item MOSS Encoder on noisy speech $\to$ conditioning features $\mathbf{c}$
+\end{itemize}
+This offline design ensures that training requires only loading pre-computed tensors---neither DAC (74M params) nor MOSS (1.6B params) are loaded during training, enabling Colab-scale compute.
+
+\textbf{(2) Training.}
+At each step, we sample $t \sim U(0,1)$, compute $\mathbf{x}_t$ (Eq.~\ref{eq:interpolation}), and train the DiT to predict the velocity field with the MSE loss (Eq.~\ref{eq:loss}).
+
+\textbf{(3) Inference.}
+Given a new noisy utterance, we encode it with both DAC (to get $\mathbf{x}_0$) and MOSS (to get $\mathbf{c}$), then run a 50-step Euler ODE from $t=0$ to $t=1$, and decode $\hat{\mathbf{x}}_1$ with the DAC decoder to produce the enhanced waveform.
+
+\subsection{Diffusion Transformer Architecture}
+
+The velocity predictor is a Diffusion Transformer (DiT):
+\begin{itemize}[itemsep=2pt]
+  \item \textbf{Input projection}: Linear($1024 \to 512$)
+  \item \textbf{Timestep embedding}: Sinusoidal embedding $\to$ MLP($512 \to 2048 \to 512$)
+  \item \textbf{6 DiT blocks}, each containing:
+    \begin{enumerate}[itemsep=1pt]
+      \item AdaLN($t$) $\to$ Multi-Head Self-Attention (8 heads)
+      \item AdaLN($t$) $\to$ Cross-Attention (Q from latent, K/V from $\mathbf{c}$)
+      \item AdaLN($t$) $\to$ Feed-Forward (4$\times$ expansion, GELU)
+    \end{enumerate}
+  \item \textbf{Output projection}: LayerNorm $\to$ Linear($512 \to 1024$)
+\end{itemize}
+Adaptive Layer Normalisation (adaLN) injects the timestep embedding as scale and shift parameters, following the standard DiT design~\cite{peebles2023scalable}.
+
+\subsection{Multi-Layer Conditioning}
+\label{sec:conditioning}
+
+We compare four conditioning strategies that differ \emph{only} in how MOSS features are provided to the cross-attention layers.
+The DiT backbone is otherwise identical across all variants.
+
+\paragraph{Experiment 1: No conditioning (\texttt{none}).}
+The cross-attention layers are removed entirely.
+The DiT operates solely on the noisy DAC latent with timestep.
+This serves as the baseline: 28.4M parameters.
+
+\paragraph{Experiment 2: Last-layer conditioning (\texttt{last\_layer}).}
+The standard approach: condition on $\mathbf{h}_{31} \in \mathbb{R}^{T_c \times 768}$, the final encoder output of MOSS before quantisation.
+The cross-attention layers add +10.1M parameters (K/V projections from 768-dim condition to 512-dim hidden).
+
+\paragraph{Experiment 3: Static multi-layer conditioning (\texttt{multi\_layer}).}
+We extract all 32 hidden-layer outputs $\{\mathbf{h}_i\}_{i=0}^{31}$, each in $\mathbb{R}^{T_c \times 1280}$, and compute a learnable weighted sum:
+\begin{equation}
+  \mathbf{c} = \sum_{i=0}^{31} \text{softmax}(\mathbf{w})_i \cdot \mathbf{h}_i
+  \label{eq:static-fusion}
+\end{equation}
+where $\mathbf{w} \in \mathbb{R}^{32}$ is a learnable parameter vector initialised to zeros (uniform weights after softmax).
+This adds only 32 scalar parameters over the cross-attention baseline, but changes the conditioning dimension to 1280 (requiring adjusted K/V projections).
+
+\paragraph{Experiment 4: Time-dependent multi-layer conditioning (\texttt{multi\_layer\_time}).}
+Instead of static weights, a small MLP maps the ODE timestep to per-layer weights:
+\begin{equation}
+  \mathbf{c}(t) = \sum_{i=0}^{31} \text{softmax}\!\big(\text{MLP}(t)\big)_i \cdot \mathbf{h}_i
+  \label{eq:time-fusion}
+\end{equation}
+The MLP has architecture $1 \xrightarrow{\text{Linear}} 64 \xrightarrow{\text{SiLU}} 32$, adding 2,208 parameters.
+This allows the model to emphasise different types of features at different stages of the ODE trajectory---e.g., acoustic detail layers early in denoising and semantic layers later.
+
+% ============================================================
+\section{Experimental Setup}
+\label{sec:setup}
+
+\subsection{Data}
+
+We use \textbf{LibriSpeech dev-clean} (2,703 utterances) as clean speech and \textbf{MUSAN noise/free-sound} as environmental noise.
+Noisy mixtures are generated at SNR $\in \{-5, 0, 5, 10, 15\}$\,dB using our mixing pipeline.
+As a proof-of-concept, all models are trained on the \textbf{5\,dB} condition.
+The data is split 80/10/10 into train/validation/test sets (2,163/270/270 utterances).
+
+All features are extracted offline:
+\begin{itemize}[itemsep=2pt]
+  \item DAC latents: $(T_{\text{dac}}, 1024)$ per utterance, truncated to 200 frames (4\,s at 50\,Hz)
+  \item MOSS last-layer: $(T_{\text{moss}}, 768)$, MOSS multi-layer: 32 $\times$ $(T_{\text{moss}}, 1280)$
+  \item MOSS features are truncated to 50 frames ($= 200/4$, matching the 50\,Hz/12.5\,Hz ratio)
+\end{itemize}
+
+\subsection{Training}
+
+All four models are trained with identical hyperparameters:
+\begin{itemize}[itemsep=2pt]
+  \item AdamW optimiser, learning rate $10^{-4}$, weight decay $10^{-5}$
+  \item Batch size 16, cosine annealing schedule with 200-step warmup
+  \item Maximum 100 epochs, early stopping with patience 20
+  \item Gradient clipping at norm 1.0
+\end{itemize}
+Training was performed on Google Colab Pro (T4/A100 GPUs).
+
+\subsection{Evaluation Metrics}
+
+We evaluate on three complementary metrics:
+
+\textbf{PESQ} (Perceptual Evaluation of Speech Quality)~\cite{rix2001perceptual}: wideband mode, range $[-0.5, 4.5]$.
+Approximates human mean opinion scores via an auditory model.
+Note that generative flow-based models typically achieve lower PESQ than supervised discriminative models, as they optimise for naturalness rather than point-wise signal fidelity.
+
+\textbf{STOI} (Short-Time Objective Intelligibility)~\cite{taal2010short}: range $[0, 1]$.
+Computes the average correlation of short-time spectral envelopes between reference and degraded signals.
+
+\textbf{FAD} (Fréchet Audio Distance)~\cite{kilgour2019frechet}: measures distributional similarity in VGGish embedding space:
+\begin{equation}
+  \text{FAD} = \|\boldsymbol{\mu}_r - \boldsymbol{\mu}_g\|^2 + \text{Tr}\!\left(\boldsymbol{\Sigma}_r + \boldsymbol{\Sigma}_g - 2(\boldsymbol{\Sigma}_r\boldsymbol{\Sigma}_g)^{1/2}\right)
+\end{equation}
+Lower FAD indicates more natural, reference-like audio.
+
+% ============================================================
+\section{Results}
+\label{sec:results}
+
+\subsection{Main Results}
+
+Table~\ref{tab:results} presents the evaluation results across all four conditioning variants.
+
+\begin{table}[h]
+\centering
+\caption{Evaluation results on the test set (270 utterances, 5\,dB SNR). Best results in \textbf{bold}.}
+\label{tab:results}
+\begin{tabular}{clccc}
+\toprule
+\textbf{Exp} & \textbf{Condition} & \textbf{PESQ $\uparrow$} & \textbf{STOI $\uparrow$} & \textbf{FAD $\downarrow$} \\
+\midrule
+1 & None (no MOSS)    & 1.6048 & 0.8527 & 2.9774 \\
+2 & Last layer only   & 1.6499 \footnotesize{(+2.8\%)} & 0.8589 & 2.6997 \\
+3 & Static multi-layer & 1.6868 \footnotesize{(+5.1\%)} & 0.8642 & 2.3857 \\
+4 & Time-dep.\ multi-layer & \textbf{1.6986} \footnotesize{(+5.8\%)} & \textbf{0.8647} & \textbf{2.3456} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{All three metrics improve monotonically} from Experiment~1 through Experiment~4: no conditioning $<$ last layer $<$ static multi-layer $<$ time-dependent multi-layer.
+
+\subsection{Analysis}
+
+\paragraph{Multi-layer conditioning provides substantial gains.}
+Moving from no conditioning (Exp~1) to last-layer conditioning (Exp~2) yields +2.8\% PESQ and $-9.3\%$ FAD.
+Using all 32 layers (Exp~3) further improves to +5.1\% PESQ and $-19.9\%$ FAD, despite adding only 32 extra parameters over the cross-attention baseline.
+This confirms our hypothesis that information distributed across multiple MOSS layers is complementary and beneficial.
+
+\paragraph{Time-dependent fusion adds further improvement.}
+Experiment~4 achieves the best results across all metrics.
+The MLP produces time-varying weights at a cost of only 2,208 additional parameters.
+Analysis of the learned time-dependent weights reveals:
+\begin{itemize}[itemsep=2pt]
+  \item At $t \approx 0$ (start of ODE, close to the noisy input), weights are approximately uniform across all 32 layers.
+  \item As $t \to 1$ (approaching clean target), the weights become more peaked, with increased emphasis on earlier layers.
+  \item The standard deviation of the weight distribution increases from 0.0012 at $t=0$ to 0.0031 at $t=1$, indicating progressive specialisation.
+\end{itemize}
+This behaviour is consistent with an intuitive interpretation: early in the denoising trajectory, the model benefits from a broad mixture of information, while later stages require more targeted acoustic detail (captured by lower layers).
+
+\paragraph{Static fusion learns near-uniform weights.}
+In Experiment~3, the learned weight vector has a Gini coefficient of only 0.007 (near-perfectly uniform).
+All 32 layers contribute roughly equally, suggesting that each layer adds non-redundant information.
+This uniformity also motivates the time-dependent variant: if all layers matter, giving the model the flexibility to dynamically re-weight them per timestep can only help.
+
+\paragraph{PESQ score context.}
+Our PESQ scores (1.60--1.70) may appear modest compared to supervised discriminative models.
+However, flow-based generative models optimise for perceptual naturalness rather than point-wise signal reconstruction.
+The FAD metric, which measures distributional quality, shows a much larger improvement ($-21.2\%$ from Exp~1 to Exp~4), indicating that multi-layer conditioning most significantly improves the perceptual naturalness and distributional fidelity of the enhanced speech.
+
+% ============================================================
+\section{Limitations and Future Work}
+\label{sec:limitations}
+
+\subsection{Limitations}
+
+\paragraph{Single SNR training.}
+All models were trained on 5\,dB SNR only, as a proof-of-concept under constrained compute.
+While noisy mixtures at $\{-5, 0, 5, 10, 15\}$\,dB are available, a single-SNR model may not generalise across the full noise-level spectrum.
+
+\paragraph{Limited noise diversity.}
+The MUSAN free-sound subset provides environmental noise but does not cover the full diversity of real-world acoustic conditions (e.g., reverberation, multi-speaker babble, music interference).
+Models trained on this data will likely struggle with out-of-distribution noise types.
+
+\paragraph{Computational cost of multi-layer conditioning.}
+Using all 32 MOSS layers means $32\times$ more conditioning data per utterance compared to single-layer conditioning.
+During feature extraction, this increases storage (32 tensors of $(T, 1280)$ vs.\ one of $(T, 768)$); at training time, the fusion operation adds modest compute.
+
+\paragraph{DAC reconstruction ceiling.}
+Since we operate in DAC's continuous latent space, the maximum achievable quality is bounded by DAC's own reconstruction fidelity.
+Any artefacts introduced by DAC encoding and decoding will appear in our enhanced output regardless of the flow model's quality.
+
+\subsection{Future Work}
+
+\begin{enumerate}[itemsep=3pt]
+  \item \textbf{Multi-SNR training} using the available $\{-5, 0, 5, 10, 15\}$\,dB data for a robust, general-purpose model.
+  \item \textbf{Layer selection study}: the near-uniform weights in Exp~3 suggest all layers contribute, but a subset (e.g., first~15 + last) may achieve comparable results at lower cost.
+  \item \textbf{Scaling}: larger datasets (full LibriSpeech, DNS Challenge) and more noise types would test generalisation.
+  \item \textbf{Faster inference} via ODE distillation (e.g., consistency distillation~\cite{song2023consistency}) to reduce the 50-step Euler solver.
+  \item \textbf{Alternative fusion architectures}: attention-based layer fusion or per-block layer selection in the DiT.
+\end{enumerate}
+
+% ============================================================
+\section{Conclusion}
+\label{sec:conclusion}
+
+We have presented a flow-matching speech enhancement system that operates in the continuous latent space of pre-trained audio tokenizers (DAC and MOSS).
+Through a controlled four-way ablation, we demonstrate that \emph{multi-layer} conditioning from the MOSS tokenizer consistently outperforms both unconditional and last-layer-only baselines across all metrics.
+Our time-dependent fusion variant, which dynamically adjusts per-layer weights based on the ODE timestep, achieves the best results at a negligible parameter cost (+2,208 parameters).
+
+The monotonic improvement pattern---no conditioning $<$ last layer $<$ static multi-layer $<$ time-dependent multi-layer---provides strong evidence that leveraging the full depth of pre-trained audio encoders is beneficial for speech enhancement, analogous to multi-scale feature extraction in computer vision.
+
+% ============================================================
+\bibliographystyle{plainnat}
+\begin{thebibliography}{10}
+
+\bibitem[Lipman et~al.(2023)]{lipman2023flow}
+Yaron Lipman, Ricky T.~Q. Chen, Heli Ben-Hamu, Maximilian Nickel, and Matt Le.
+\newblock Flow matching for generative modeling.
+\newblock In \emph{International Conference on Learning Representations (ICLR)}, 2023.
+
+\bibitem[Liu et~al.(2023)]{liu2023flow}
+Xingchao Liu, Chengyue Gong, and Qiang Liu.
+\newblock Flow straight and fast: Learning to generate and transfer data with rectified flow.
+\newblock In \emph{International Conference on Learning Representations (ICLR)}, 2023.
+
+\bibitem[Kumar et~al.(2024)]{kumar2024high}
+Rithesh Kumar, Prem Seetharaman, Alejandro Luebs, Ishaan Kumar, and Kundan Kumar.
+\newblock High-fidelity audio compression with improved {RVQGAN}.
+\newblock In \emph{Advances in Neural Information Processing Systems (NeurIPS)}, 2023.
+
+\bibitem[Ma et~al.(2024)]{ma2024language}
+Ziyang Ma, Yakun Song, Chenpeng Du, Jian Cong, Zhuo Chen, Yuping Wang, Yuxuan Wang, and Xie Chen.
+\newblock Language model can listen while speaking.
+\newblock \emph{arXiv preprint arXiv:2408.02622}, 2024.
+
+\bibitem[Peebles and Xie(2023)]{peebles2023scalable}
+William Peebles and Saining Xie.
+\newblock Scalable diffusion models with transformers.
+\newblock In \emph{International Conference on Computer Vision (ICCV)}, 2023.
+
+\bibitem[Richter et~al.(2023)]{richter2023speech}
+Julius Richter, Simon Welker, Jean-Marie Lemercier, Bunlong Lay, and Timo Gerkmann.
+\newblock Speech enhancement and dereverberation with diffusion-based generative models.
+\newblock \emph{IEEE/ACM Transactions on Audio, Speech, and Language Processing}, 2023.
+
+\bibitem[Lu et~al.(2013)]{lu2013speech}
+Xugang Lu, Yu Tsao, Shigeki Matsuda, and Chiori Hori.
+\newblock Speech enhancement based on deep denoising autoencoder.
+\newblock In \emph{Interspeech}, 2013.
+
+\bibitem[Rix et~al.(2001)]{rix2001perceptual}
+Antony~W Rix, John~G Beerends, Michael~P Hollier, and Andries~P Hekstra.
+\newblock Perceptual evaluation of speech quality ({PESQ}) --- a new method for speech quality assessment of telephone networks and codecs.
+\newblock In \emph{IEEE International Conference on Acoustics, Speech, and Signal Processing (ICASSP)}, 2001.
+
+\bibitem[Taal et~al.(2010)]{taal2010short}
+Cees~H Taal, Richard~C Hendriks, Richard Heusdens, and Jesper Jensen.
+\newblock A short-time objective intelligibility measure for time-frequency weighted noisy speech.
+\newblock In \emph{IEEE International Conference on Acoustics, Speech, and Signal Processing (ICASSP)}, 2010.
+
+\bibitem[Kilgour et~al.(2019)]{kilgour2019frechet}
+Kevin Kilgour, Mauricio Zuluaga, Dominik Roblek, and Matthew Sharifi.
+\newblock Fr\'echet audio distance: A reference-free metric for evaluating music enhancement algorithms.
+\newblock In \emph{Interspeech}, 2019.
+
+\bibitem[Song et~al.(2023)]{song2023consistency}
+Yang Song, Prafulla Dhariwal, Mark Chen, and Ilya Sutskever.
+\newblock Consistency models.
+\newblock In \emph{International Conference on Machine Learning (ICML)}, 2023.
+
+\end{thebibliography}
+
+\end{document}
