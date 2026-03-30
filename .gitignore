@@ -57,3 +57,6 @@ __MACOSX/
 overnight.log
 outputs/
 archives/
+
+# Submission package (generated)
+submission_package/
