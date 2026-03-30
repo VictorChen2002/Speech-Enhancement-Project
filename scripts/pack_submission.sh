@@ -49,10 +49,23 @@ for f in "$SRC_DIR"/scripts/*.sh; do
     [ -f "$f" ] && cp "$f" "$OUT_DIR/scripts/"
 done
 
-# Notebooks (analysis only — skip colab infra notebooks)
+# Notebooks — include analysis, demo, and all Colab notebooks
 mkdir -p "$OUT_DIR/notebooks"
-cp "$SRC_DIR/notebooks/analysis.ipynb"     "$OUT_DIR/notebooks/" 2>/dev/null || true
-cp "$SRC_DIR/notebooks/inspection.ipynb"   "$OUT_DIR/notebooks/" 2>/dev/null || true
+for nb in analysis.ipynb inspection.ipynb demo_analysis.ipynb \
+          train_colab.ipynb train_multi_snr_colab.ipynb \
+          plan_b_data_prep.ipynb plan_b_train.ipynb \
+          plan_c_small_model.ipynb plan_d_anti_overfit.ipynb; do
+    cp "$SRC_DIR/notebooks/$nb" "$OUT_DIR/notebooks/" 2>/dev/null || true
+done
+
+# Report
+mkdir -p "$OUT_DIR/report"
+cp "$SRC_DIR/report/report.tex" "$OUT_DIR/report/" 2>/dev/null || true
+cp "$SRC_DIR/report/cvpr.sty"   "$OUT_DIR/report/" 2>/dev/null || true
+
+# READMEs
+cp "$SRC_DIR/README.md"            "$OUT_DIR/"
+cp "$SRC_DIR/submission_README.md" "$OUT_DIR/" 2>/dev/null || true
 
 echo "=== Files packed ==="
 find "$OUT_DIR" -type f | sort | sed "s|$OUT_DIR/||"
